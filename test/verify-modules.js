@@ -459,6 +459,80 @@ function check(name, ok, detail) {
   check('状态卡新增在线发音行', ttsUI.stateHasOnlineRow === true);
   check('状态卡标签为在线可用', /在线发音/.test(ttsUI.stateTag || ''), ttsUI.stateTag);
 
+  /* ---------- 音质 ---------- */
+  console.log('\n=== 7b. 音质 ===\n');
+  // 服务端实测结论：采样率被锁在 24kHz，48kbps 会被砍高频导致发闷，
+  // 必须用 96kbps。48kHz 系列服务端直接拒绝（no turn.end）。
+  const qa = await page.evaluate(async () => {
+    const base = window.TTS.getProxy();
+    const j = await fetch(base + '/voices').then(r => r.json()).catch(() => null);
+    const r = await fetch(base + '/tts?text=' + encodeURIComponent('Mr. Smith is a Dr. from the U.S.')
+      + '&voice=en-US-AriaNeural&rate=0%25').catch(() => null);
+    return {
+      format: j && j.format,
+      voices: (j && j.voices) || [],
+      bytes: r ? (await r.arrayBuffer()).byteLength : 0
+    };
+  });
+  check('音频格式为 96kbps', /96kbitrate/.test(qa.format || ''), qa.format);
+  check('未使用不可用的 48kHz 格式', !/48khz/.test(qa.format || ''), qa.format);
+  check('缩写与符号已展开朗读', qa.bytes > 10000, qa.bytes + ' 字节');
+
+  // 失效音色必须已从列表剔除：en-US-JaneNeural / en-US-EvanNeural
+  // 这两个实测会静默失败（服务端关闭连接且不报错）
+  const ids = qa.voices.map(v => v.id);
+  check('已剔除静默失败的音色',
+    ids.indexOf('en-US-JaneNeural') < 0 && ids.indexOf('en-US-EvanNeural') < 0,
+    ids.length + ' 个音色');
+  check('每个音色都有用途说明',
+    qa.voices.every(v => !!v.desc), qa.voices.filter(v => !v.desc).length + ' 个缺说明');
+  check('标注了跟读推荐音色',
+    qa.voices.filter(v => v.recommended).length >= 3,
+    qa.voices.filter(v => v.recommended).map(v => v.name).join('/'));
+
+  // 缓存必须按音频格式分键，否则换音质后旧音频会被继续返回。
+  // 注意别假设第一次一定是 MISS：磁盘缓存是持久的，上一轮跑过同样文本时
+  // 第一次就会 HIT。真正要断言的是「第二次一定 HIT」。
+  const cacheOK = await page.evaluate(async () => {
+    const base = window.TTS.getProxy();
+    const u = '?text=' + encodeURIComponent('cache probe ' + Date.now())
+      + '&voice=en-US-AriaNeural&rate=0%25';
+    const first = await fetch(base + '/tts' + u, { cache: 'no-store' });
+    const h1 = first.headers.get('X-Cache');
+    await first.arrayBuffer();
+    const second = await fetch(base + '/tts' + u, { cache: 'no-store' });
+    const h2 = second.headers.get('X-Cache');
+    await second.arrayBuffer();
+    return { first: h1, second: h2 };
+  });
+  check('首次请求成功返回音频',
+    cacheOK.first === 'MISS' || cacheOK.first === 'HIT', cacheOK.first);
+  check('同文本二次命中缓存', cacheOK.second === 'HIT',
+    cacheOK.first + ' → ' + cacheOK.second);
+
+  /* ---------- 抗限流 ----------
+     Edge TTS 对短时间内的密集请求会直接断连（ECONNRESET / no turn.end）。
+     服务端必须有退避重试，否则用户感知是「发音时好时坏、偶尔直接没声音」。
+     连续发几个不同文本，任何一次失败都会暴露这个问题。 */
+  const burst = await page.evaluate(async () => {
+    const base = window.TTS.getProxy();
+    const out = [];
+    for (let i = 0; i < 4; i++) {
+      try {
+        const r = await fetch(base + '/tts?text=' + encodeURIComponent('burst probe ' + Date.now() + ' ' + i)
+          + '&voice=en-US-AriaNeural&rate=0%25', { cache: 'no-store' });
+        const b = await r.arrayBuffer();
+        out.push({ status: r.status, bytes: b.byteLength });
+      } catch (e) {
+        out.push({ status: 0, bytes: 0, err: e.message });
+      }
+    }
+    return out;
+  });
+  check('连续快速请求全部成功',
+    burst.every(r => r.status === 200 && r.bytes > 200),
+    burst.map(r => r.status + '/' + r.bytes).join(' '));
+
   console.log('\n=== 8. 无 JS 异常 ===\n');
   check('无未捕获异常', errs.length === 0, errs.slice(0, 3).join(' | '));
 

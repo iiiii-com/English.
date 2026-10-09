@@ -430,37 +430,91 @@
           var st = global.Store && global.Store.state;
           cur = (st && st.settings && st.settings.ttsVoice) || '';
         } catch (e) { /* 忽略 */ }
+        var activeId = cur || 'en-US-AriaNeural';
 
         var lab = h('div');
-        lab.style.cssText = 'font-size:12.5px;color:var(--text-3);margin-bottom:8px';
+        lab.style.cssText = 'font-size:12.5px;color:var(--text-3);margin-bottom:4px';
         lab.textContent = '选择音色';
         voiceBox.appendChild(lab);
 
-        var grid = h('div');
-        grid.style.cssText = 'display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:8px';
-        list.forEach(function (v) {
-          var id = v.id || v.name;
-          var on = (cur || 'en-US-AriaNeural') === id;
-          var b = h('button', on ? 'on' : 'soft', v.label || id);
-          b.type = 'button';
-          b.style.cssText = 'padding:8px 10px;font-size:12.5px;text-align:left;'
-            + 'border-radius:9px;border:1px solid var(--border);background:var(--surface-2);cursor:pointer';
-          if (on) {
-            b.style.background = 'var(--accent-soft,#eef2ff)';
-            b.style.borderColor = 'var(--accent,#4f7cff)';
-            b.style.color = 'var(--accent,#4f7cff)';
+        var tip = h('div');
+        tip.style.cssText = 'font-size:12.5px;color:var(--text-3);margin-bottom:12px;line-height:1.7';
+        tip.textContent = '不确定就选「跟读首选」里的——这类音色咬字清楚、语速偏慢，'
+          + '适合一句一句对照着学。「自然童声」最接近真人，但连读多，初学阶段反而不易听清。';
+        voiceBox.appendChild(tip);
+
+        /* 按用途分组，而不是把十几项平铺成一样的格子。
+           平铺的结果是用户只能靠名字猜——而音色名（Aria/Jenny/Sonia）
+           对学习者没有任何信息量。 */
+        var GROUPS = [
+          { role: 'recommend', title: '跟读首选', hint: '咬字清晰、语速适中，最适合逐句对照学习' },
+          { role: 'natural', title: '自然童声', hint: '最接近真人演讲，听感最好；连读较多' },
+          { role: 'normal', title: '其他音色', hint: '' }
+        ];
+
+        GROUPS.forEach(function (g) {
+          var items = list.filter(function (v) { return (v.role || 'normal') === g.role; });
+          if (!items.length) return;
+
+          var gt = h('div');
+          gt.style.cssText = 'display:flex;align-items:baseline;gap:8px;margin:14px 0 8px';
+          var gtn = h('span');
+          gtn.style.cssText = 'font-size:13px;font-weight:600;color:var(--text)';
+          gtn.textContent = g.title;
+          gt.appendChild(gtn);
+          if (g.hint) {
+            var gth = h('span');
+            gth.style.cssText = 'font-size:11.5px;color:var(--text-3)';
+            gth.textContent = g.hint;
+            gt.appendChild(gth);
           }
-          b.onclick = function () {
-            try {
-              global.Store.state.settings.ttsVoice = id;
-              if (global.Store.save) global.Store.save();
-            } catch (e) { /* 忽略 */ }
-            buildVoices();
-            ui.toast('音色已切换');
-          };
-          grid.appendChild(b);
+          voiceBox.appendChild(gt);
+
+          var grid = h('div');
+          grid.style.cssText = 'display:grid;grid-template-columns:repeat(auto-fill,minmax(168px,1fr));gap:8px';
+
+          items.forEach(function (v) {
+            var id = v.id || v.name;
+            var on = activeId === id;
+            var b = h('button');
+            b.type = 'button';
+            b.style.cssText = 'text-align:left;padding:10px 12px;border-radius:10px;cursor:pointer;'
+              + 'border:1px solid ' + (on ? 'var(--accent,#4f7cff)' : 'var(--border)')
+              + ';background:' + (on ? 'var(--accent-soft,#eef2ff)' : 'var(--surface-2)')
+              + ';color:' + (on ? 'var(--accent,#4f7cff)' : 'var(--text)') + ';transition:border-color .15s,background .15s';
+            if (on) b.style.fontWeight = '600';
+
+            var top = h('div');
+            top.style.cssText = 'display:flex;align-items:center;gap:6px;font-size:13px';
+            top.textContent = v.label || v.name;
+            if (on) {
+              var tick = h('span', null, '✓');
+              tick.style.cssText = 'font-size:11px;margin-left:auto';
+              top.appendChild(tick);
+            }
+            b.appendChild(top);
+
+            if (v.desc) {
+              var d = h('div');
+              d.style.cssText = 'font-size:11.5px;color:var(--text-3);margin-top:2px;line-height:1.5';
+              d.textContent = v.desc;
+              b.appendChild(d);
+            }
+
+            b.onclick = function () {
+              try {
+                global.Store.state.settings.ttsVoice = id;
+                if (global.Store.save) global.Store.save();
+              } catch (e) { /* 忽略 */ }
+              buildVoices();
+              ui.toast('已切换到' + (v.label || v.name));
+              // 立刻用新音色读一句，让用户直接听出差别
+              T.speak('Could you walk me through the process one more time?');
+            };
+            grid.appendChild(b);
+          });
+          voiceBox.appendChild(grid);
         });
-        voiceBox.appendChild(grid);
 
         /* --- 整句试听：整句是口语模块的核心，试听必须用整句 --- */
         var tr = h('div', 'btn-row');
