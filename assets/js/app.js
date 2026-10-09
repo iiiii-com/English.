@@ -236,6 +236,9 @@
       if (!global.TTS) return;
       // 本机有英语语音就不必打扰——它本身就是一条可用的路径
       if (global.TTS.hasEnglishVoice && global.TTS.hasEnglishVoice()) return;
+      // 离线包已内置时也不必打扰：高频词本来就能读，
+      // 这时还提示「无法发音」是虚假告警，比不提示更糟。
+      if (global.TTS.packInfo && global.TTS.packInfo().count) return;
       if (!global.TTS.proxyReachable || global.TTS.proxyReachable() !== false) return;
 
       var warn = h('div', 'tts-banner');

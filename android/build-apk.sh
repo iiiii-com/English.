@@ -63,6 +63,13 @@ for item in index.html manifest.webmanifest assets; do
     cp -r "$PROJ/$item" "$WEB_DEST/"
   fi
 done
+# 离线音频包放在 assets/audio/ 下（已被上面覆盖），
+# 这里额外校验一次：漏掉它会让 App 退回「必须联网才能发音」的老问题
+if [ ! -f "$WEB_DEST/assets/audio/manifest.js" ]; then
+  echo "   错误：离线音频包清单未同步，终止构建"
+  echo "   请先执行：node tools/pregen-audio.js"
+  exit 1
+fi
 # APK 内不需要 Service Worker：资源已随包分发，
 # 留着反而会缓存旧版本资源导致更新不及时
 rm -f "$WEB_DEST/sw.js"

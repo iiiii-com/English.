@@ -624,6 +624,74 @@ function check(name, ok, detail) {
   check('已提示手机需用局域网地址', /127\.0\.0\.1.*手机|手机.*127\.0\.0\.1|WiFi/i.test(m.text));
   await p3.close();
 
+  /* ---------- 7d. 离线音频包（不依赖任何网络） ---------- */
+  console.log('\n=== 7d. 离线音频包（免网络兜底） ===\n');
+
+  const p4 = await browser.newPage();
+  await p4.goto(BASE, { waitUntil: 'domcontentloaded' });
+  await p4.waitForTimeout(800);
+
+  const pk = await p4.evaluate(() => {
+    const T = window.TTS;
+    return {
+      hasPack: !!(window.AUDIO_PACK && window.AUDIO_PACK.words),
+      count: (T.packInfo && T.packInfo().count) || 0,
+      // 取一个包内词和一个包外词，验证查询逻辑双向正确
+      inUrl: T.packUrl('one'),
+      outUrl: T.packUrl('zzz-not-a-real-word-xyz'),
+      hasIn: T.packHas('one'),
+      hasOut: T.packHas('zzz-not-a-real-word-xyz'),
+      caseInsensitive: T.packHas('ONE')
+    };
+  });
+  check('离线包清单已加载', pk.hasPack);
+  check('离线包收录了高频词', pk.count >= 600, pk.count + ' 词');
+  check('包内词能解析出音频地址', !!pk.inUrl && /assets\/audio\/words\/\w+\.mp3$/.test(pk.inUrl), pk.inUrl);
+  check('包外词返回 null（交回降级链）', pk.outUrl === null && pk.hasOut === false);
+  check('查词不区分大小写', pk.caseInsensitive === true);
+
+  // 关键验证：把代理地址改成必然连不通的端口，
+  // 模拟「手机连不上电脑上服务」，此时包内词仍必须能真实播放。
+  const played = await p4.evaluate(async () => {
+    const T = window.TTS;
+    T.setProxy('http://127.0.0.1:9');   // 9 端口是 discard，必然连不上
+    T.stop();
+    await new Promise(r => setTimeout(r, 300));
+    return await new Promise(resolve => {
+      let started = false, ended = false, err = '';
+      const t = setTimeout(() => resolve({ started, ended, err: err || 'timeout' }), 9000);
+      const h = T.speak('one', {
+        onstart: () => { started = true; },
+        onend: () => { ended = true; clearTimeout(t); resolve({ started, ended, err }); },
+        onerror: (e) => { err = e; clearTimeout(t); resolve({ started, ended, err }); }
+      });
+      return h;
+    });
+  });
+  check('代理连不通时，离线包仍能真实播放',
+    played.started && played.ended, JSON.stringify(played));
+
+  // 音频文件本身必须真的存在且是合法 mp3
+  const audioOk = await p4.evaluate(async () => {
+    const T = window.TTS;
+    const url = T.packUrl('one');
+    try {
+      const r = await fetch(url, { cache: 'no-store' });
+      if (!r.ok) return 'HTTP ' + r.status;
+      const b = await r.blob();
+      // mp3 文件头：ID3 标签或 0xFFEx 帧同步
+      const head = new Uint8Array(await b.slice(0, 3).arrayBuffer());
+      const isID3 = head[0] === 0x49 && head[1] === 0x44 && head[2] === 0x33;
+      const isFrame = head[0] === 0xFF && (head[1] & 0xE0) === 0xE0;
+      return (isID3 || isFrame) ? b.size + ' 字节 mp3' : '不是 mp3';
+    } catch (e) { return 'ERR ' + e.message; }
+  });
+  check('音频文件是合法 mp3', /字节 mp3$/.test(audioOk), audioOk);
+
+  // 恢复代理地址，避免影响后续测试
+  await p4.evaluate(() => { window.TTS.setProxy('http://127.0.0.1:8788'); });
+  await p4.close();
+
   console.log('\n=== 8. 无 JS 异常 ===\n');
   check('无未捕获异常', errs.length === 0, errs.slice(0, 3).join(' | '));
 

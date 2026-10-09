@@ -55,6 +55,11 @@
       } else if (d.env === 'cloud') {
         tag.className = 'tag';
         tag.textContent = '云端发音';
+      } else if (d.env === 'pack') {
+        // 离线包可用：不是「不可用」，是「只有收录的词能读」
+        tag.className = 'tag green';
+        tag.textContent = '离线词库可用';
+        onceOK();
       } else if (d.env === 'no-en-voice') {
         tag.className = 'tag warn';
         tag.textContent = '缺少英语语音包';
@@ -68,11 +73,14 @@
       var rows = [
         ['运行环境', d.hasNative ? 'Android App' : '浏览器'],
         ['浏览器支持语音合成', d.supported ? '是' : '否'],
+        ['离线词库（免网络）', (T.packInfo && T.packInfo().count)
+          ? T.packInfo().count + ' 个词已内置' : '未内置'],
         ['在线发音服务', (T.proxyAlive && T.proxyAlive()) ? '已连接' : '未连接'],
         ['系统语音总数', d.totalVoices + ' 个'],
         ['其中英语语音', d.englishVoices > 0 ? d.englishVoices + ' 个' : '0 个（无法读英文）'],
         ['当前使用', (T.proxyAlive && T.proxyAlive())
           ? '在线发音（自带音色，整句可读）'
+          : (T.packInfo && T.packInfo().count) ? '离线词库 ' + T.packInfo().count + ' 词（长句需连服务）'
           : d.env === 'native-ok' ? 'App 原生语音引擎'
           : d.env === 'ok' ? '本机：' + d.picked
           : d.env === 'cloud' ? '云端发音' : '暂不可用']

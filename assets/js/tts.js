@@ -6,12 +6,15 @@
    englishVoices = 0。此时用系统TTS 读英文单词，要么没声音，
    要么被中文引擎念成奇怪的发音—— 这就是「点了发音听不到」的真正原因。
 
-   本模块采用三层策略，逐级降级，保证任何设备上都能发音：
+   本模块采用逐级降级策略，保证任何设备上都能发音：
 
-     第1 层  本机英语语音      —— 系统装了英语语音包时使用。完全离线，最快。
-     第 2 层  云端发音          —— 本机无英语语音时，把文本发给词典服务取音频。
-              仅在用户明确允许「云端发音」后启用，且界面会告知数据流向。
-     第 3 层  提示引导          —— 两者都不可用时，给出可操作的解决步骤。
+     第 0 层  离线音频包        —— 预生成打进安装包的 mp3。
+              不需要网络、不需要服务、不需要任何权限，
+              是唯一在「手机连不上电脑」时依然 100% 可用的路径。
+     第 1 层  本机英语语音      —— 系统装了英语语音包时使用。
+     第 2 层  代理发音          —— 本地/局域网服务，音质最好，覆盖长句。
+     第 3 层  云端发音          —— 把文本发给词典服务取音频，需用户允许。
+     第 4 层  提示引导          —— 都不可用时，给出可操作的解决步骤。
 
    另有若干浏览器级缺陷需处理：
      1. Chrome 竞态：cancel() 后同帧 speak() 会被引擎丢弃（完全没声音），
@@ -204,24 +207,105 @@
   }
 
   /* ============================================================
-     代理发音（首选路径）
+     离线音频包（最高优先级）
      ------------------------------------------------------------
-     这是整套发音体系里最可靠的一条路，优先级高于本机语音。
+     为什么放在最前面：
 
-     为什么不直接用「云端发音」那套（Youdao 词典接口）：
-       1. 它只覆盖单词与常见短语，整句直接返回 500。
-          实测 "thank you" 是 200，"I am writing to confirm" 是 500——
-          而口语模块的核心内容恰恰是整句。
-       2. 音色只有一种，没有英音/美音/快慢区分。
+     代理发音音质最好，但它要求「手机能连到电脑上跑着的服务」。
+     这条链在真实网络里很脆弱——Windows 防火墙拦 8788、路由器开
+     AP 隔离、公司网禁设备互访、手机走蜂窝数据——任何一条成立，
+     手机上就彻底没声音。而手机上通常也没有英语语音包。
 
-     代理服务（tools/tts-server.js）基于 Edge Neural TTS：
-       - 整句、任意长度都能合成
-       - 12 种英/美/澳音色
-       - 支持变速（慢速朗读必需）
-       - 磁盘 + 内存二级缓存，重复内容 5ms 返回
+     离线包把这批高频词的音频直接打进安装包，用 <audio> 播放本地文件，
+     不发起任何网络请求，因此不受上述任何因素影响。
 
-     前端在这里只负责「问代理要 URL 并播放」，
-     合成、缓存、限流都在服务端，避免每个标签页各合成一次。
+     由 tools/pregen-audio.js 生成，清单在 assets/audio/manifest.js。
+     ============================================================ */
+
+  var PACK = global.AUDIO_PACK || null;
+
+  function packInfo() {
+    return PACK ? { ok: true, count: PACK.count || 0, voice: PACK.voice } : { ok: false, count: 0 };
+  }
+
+  /** 离线包是否收录了这个词。查询时统一小写并去首尾空格。 */
+  function packHas(text) {
+    if (!PACK || !PACK.words) return false;
+    var t = String(text || '').trim().toLowerCase();
+    if (!t) return false;
+    return Object.prototype.hasOwnProperty.call(PACK.words, t);
+  }
+
+  /** 离线包的音频地址；不在包里返回 null */
+  function packUrl(text) {
+    if (!PACK || !PACK.words) return null;
+    var t = String(text || '').trim().toLowerCase();
+    var key = PACK.words[t];
+    if (!key) return null;
+    return 'assets/audio/words/' + key + '.mp3';
+  }
+
+  var packAudio = null;
+
+  /**
+   * 播放离线包音频。
+   * 播放失败时返回 null，调用方继续走下一层（而不是静默）。
+   */
+  function speakPack(text, opts) {
+    var url = packUrl(text);
+    if (!url) return null;
+    var o = opts || {};
+
+    stopProxy();
+    stopPack();
+    try { stopKeepAlive(); } catch (e) { /* 忽略 */ }
+
+    var a = new Audio();
+    packAudio = a;
+    a.preload = 'auto';
+    a.volume = 1;
+
+    var settled = false;
+    function done(ok) {
+      if (settled) return;
+      settled = true;
+      speakingCount = Math.max(0, speakingCount - 1);
+      if (packAudio === a) packAudio = null;
+      if (ok) {
+        if (o.onend) o.onend(a);
+      } else if (o.onerror) {
+        o.onerror('pack-unavailable');
+      }
+    }
+
+    a.onplaying = function () {
+      if (o.onstart) o.onstart(a);
+      startKeepAlive();
+    };
+    a.onended = function () { stopKeepAlive(); done(true); };
+    a.onerror = function () { stopKeepAlive(); done(false); };
+
+    a.src = url;
+    var p = a.play();
+    if (p && p.catch) {
+      p.catch(function () {
+        // 自动播放策略拦截：需要一次用户手势
+        done(false);
+        lastError = 'pack-blocked';
+      });
+    }
+    return a;
+  }
+
+  function stopPack() {
+    if (!packAudio) return;
+    try { packAudio.pause(); } catch (e) { /* 忽略 */ }
+    try { packAudio.currentTime = 0; } catch (e) { /* 忽略 */ }
+    packAudio = null;
+  }
+
+  /* ============================================================
+     代理发音（次高优先级）
      ============================================================ */
 
   var PROXY_BASE = '';
@@ -514,6 +598,12 @@
    * @returns {'local'|'cloud'|'none'}
    */
   function resolveMode() {
+    /* 注意：离线包**不在这里**参与 mode 计算。
+       离线包按词精确匹配（packHas），只覆盖收录的高频词；
+       若在这里返回 'pack'，未收录的句子与例句会一并被带偏，
+       反而丢掉代理这条能读整句的路。
+       真正的取用点在 speak() 开头——命中就播，没命中自然落到下面。 */
+
     /* ---- Android App：原生引擎优先 ----
        必须排在代理之前。App 内置原生 TextToSpeech，能读整句、零延迟、
        离线可用；而代理在手机上通常没在跑，若让代理优先，
@@ -706,6 +796,26 @@
     var str = String(text).trim();
     if (!str) return null;
 
+    var o = (typeof opts === 'number') ? { rate: opts }
+          : (typeof opts === 'string') ? { lang: opts }
+          : (opts || {});
+
+    /* ---- 第 0 层：离线音频包 ----
+       唯一在「手机连不上电脑上服务」时依然可用的路径，所以最先试。
+       覆盖的是高频词（L1+L2），例句与长句仍走代理。
+
+       这里刻意放在 supported() 判断之前：supported() 只看
+       speechSynthesis 对象，而播放 mp3 完全不需要它。
+       Android WebView 里 speechSynthesis 存在但永远发不出声，
+       若先用它早退，这条最可靠的路会被直接堵死。*/
+    if (packHas(str) && pref.cloud !== 'cloud') {
+      speakingCount++;
+      var a = speakPack(str, o);
+      if (a) return { stop: stopPack, engine: 'pack' };
+      // 文件缺失或被拦截 → 落回下面的决策链
+      speakingCount = Math.max(0, speakingCount - 1);
+    }
+
     if (!supported()) {
       // supported() 只看浏览器的 speechSynthesis 对象。
       // 但代理发音用的是 <audio> 播放，完全不需要 speechSynthesis——
@@ -715,10 +825,6 @@
         return null;
       }
     }
-
-    var o = (typeof opts === 'number') ? { rate: opts }
-          : (typeof opts === 'string') ? { lang: opts }
-          : (opts || {});
 
     var rate = o.rate;
     if (rate == null) {
@@ -859,14 +965,16 @@
     stopKeepAlive();
     stopCloud();
     stopNative();
+    stopPack();
     if (!synth) return;
     try { synth.cancel(); } catch (e) { /* 忽略 */ }
   }
 
   /* ---------------- 连续朗读队列 ---------------- */
   function speakSequence(items, opts) {
-    // 与 speak() 同一个道理：代理不依赖 speechSynthesis，不能因为 supported() 为假就整条队列不播
-    if (!supported() && !proxyAlive()) { speak(''); return; }
+    // 与 speak() 同一个道理：代理和离线包都不依赖 speechSynthesis，
+    // 不能因为 supported() 为假就整条队列不播
+    if (!supported() && !proxyAlive() && !(PACK && PACK.count)) { speak(''); return; }
     var list = (items || []).map(function (it) {
       return (typeof it === 'string') ? { text: it } : (it || {});
     }).filter(function (it) { return it.text && String(it.text).trim(); });
@@ -903,6 +1011,8 @@
 
   function isSpeaking() {
     if (activeAudio && !activeAudio.paused) return true;
+    // 离线包播放走<audio>，同样不经过 speechSynthesis。
+    if (packAudio && !packAudio.paused && !packAudio.ended) return true;
     // 代理播放走 <audio>，不走 speechSynthesis。
     // 不判断它的话，连续朗读队列会在代理路径上每一句都误判为「已结束」而中断。
     if (proxyAudio && !proxyAudio.paused && !proxyAudio.ended) return true;
@@ -990,7 +1100,10 @@
     else if (!supported()) env = 'unsupported';
     else if (mode === 'local') env = 'ok';
     else if (mode === 'cloud') env = 'cloud';
-    else env = 'no-en-voice';
+    // 走到这里说明代理、本机语音、云端都不通。
+    // 但离线包仍能读收录的词，如实标成 pack 而不是「没有英语语音」——
+    // 后者会让用户误以为自己必须去装语音包。
+    else env = (PACK && PACK.count) ? 'pack' : 'no-en-voice';
 
     return {
       env: env,
@@ -1009,6 +1122,8 @@
       cloudPref: pref.cloud,
       proxyOn: proxyAlive(),
       proxyBase: PROXY_BASE,
+      // 离线包状态：即便代理不通，只要这里有词就仍能发音
+      packCount: PACK ? (PACK.count || 0) : 0,
       speaking: isSpeaking(),
       lastError: lastError,
       queueRunning: queueRunning
@@ -1057,6 +1172,10 @@
     hasNative: hasNative,
     nativeReady: function () { refreshNative(); return nativeReady; },
     hasEnglishVoice: hasEnglishVoice,
+    /* 离线音频包：让界面能如实告诉用户「哪些词不需要网络也能读」 */
+    packInfo: packInfo,
+    packHas: packHas,
+    packUrl: packUrl,
     // ---- 代理发音 ----
     setProxy: function (base) {
       PROXY_BASE = String(base || '').replace(/\/+$/, '');
