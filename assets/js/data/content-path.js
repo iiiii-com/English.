@@ -104,7 +104,7 @@
         { key: 'grammar', name: '语法准确', target: 80, desc: '能识别并主动使用复杂句式' },
         { key: 'vocab', name: '词汇广度', target: 82, desc: '累计 1600 词，含 590 个高阶语块' }
       ],
-      unlock: null,
+      unlock: { vocab: 1200, accuracy: 85, streak: 40 },
       milestones: [
         { text: '主动词汇达 1600，400 个成熟词间隔 >30 天', check: 'vocab1600' },
         { text: '阅读理解能答对推理题与态度题（不只是细节题）', check: 'readReason' },
@@ -154,7 +154,7 @@
         { key: 'grammar', name: '语法准确', target: 88, desc: '主动使用复杂句式，错误率 <5%' },
         { key: 'vocab', name: '词汇广度', target: 88, desc: '掌握 4000 词（核心+延伸）' }
       ],
-      unlock: null,
+      unlock: { vocab: 2000, accuracy: 85, streak: 50 },
       milestones: [
         { text: '累计词汇 4000（核心+延伸）', check: 'vocab4000' },
         { text: '阅读能答对推理题与词义题', check: 'readReason' },

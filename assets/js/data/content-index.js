@@ -27,7 +27,8 @@
       { key: 'DailyComm2', label: '场景功能表达' },
       { key: 'DailyComm3', label: '高频功能表达' },
       { key: 'DailyComm4', label: '生活场景表达' },
-      { key: 'DailyComm5', label: '日常综合表达' }
+      { key: 'DailyComm5', label: '日常综合表达' },
+      { key: 'DailyComm6', label: '生活细节与书面沟通' }
     ],
     scenes: [
       { key: 'SpeakingContent', label: '基础场景' },

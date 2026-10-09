@@ -705,6 +705,19 @@
 
   /* ---------- 初始化 / 导出 ---------- */
   function init() {
+    // 为纯中文释义的词条补上英文释义（源词库对 98% 的词只给中文，
+    // 学习者查词时看不到英文含义，无法建立「英文→英文」的直接联系）
+    if (global.WordEnDefs) {
+      try {
+        var pool = (global.VOCAB_DATA && global.VOCAB_DATA.words) || [];
+        if (global.GAOKAO_L5) pool = pool.concat(global.GAOKAO_L5.words);
+        if (global.GAOKAO_L6) pool = pool.concat(global.GAOKAO_L6.words);
+        if (pool.length) global.WordEnDefs.apply(pool);
+      } catch (e) {
+        console.warn('[store] 英文释义补充失败', e);
+      }
+    }
+
     state = load();
 
     // 跨天处理：清空「今日微任务」并更新打开日

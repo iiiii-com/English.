@@ -40,6 +40,271 @@
   /* ============================================================
      A. 今日复习（间隔重复主循环）
      ============================================================ */
+  /* ============================================================
+     全库浏览 —— 5449 词全部开放，无需解锁
+     与「学新词」的区别：这里不按推荐路径组织，而是像字典一样查阅。
+     ============================================================ */
+  function browseView(root) {
+    var note = h('div', 'card');
+    note.style.cssText = 'background:linear-gradient(140deg,#f0f5ff,#fff 60%)';
+    var nh = h('div', 'card-head');
+    nh.appendChild(h('h3', null, '全库浏览'));
+    nh.appendChild(h('span', 'tag l1', '全部开放'));
+    note.appendChild(nh);
+    var nt = h('div');
+    nt.style.cssText = 'font-size:13px;line-height:1.85;color:var(--text-2)';
+    nt.innerHTML = '<b>全部 5449 词已开放</b>，任何等级都能随时查阅、学习、自测。' +
+      '「等级路径」是<b>推荐的学习顺序</b>（先易后难，效率更高），不是权限限制。<br>' +
+      '用法上建议：<b>查词</b>用这里的搜索；<b>系统学习</b>走「学新词」，' +
+      '因为 SM-2 间隔重复对「按序、少量、高频复习」的效果最好。';
+    note.appendChild(nt);
+    root.appendChild(note);
+
+    var box = h('div');
+    box.id = 'browseBox';
+    box.style.marginTop = '16px';
+    root.appendChild(box);
+
+    // 词库可能分片（L5/L6 懒加载），先统计已加载部分
+    function loaded() { return allWords(); }
+
+    var sBox = h('div', 'card');
+    var sh = h('div', 'card-head');
+    sh.appendChild(h('h3', null, '查找单词'));
+    sBox.appendChild(sh);
+
+    var input = h('input', 'input');
+    input.type = 'search';
+    input.placeholder = '输入英文或中文，例如 water / 水 / aban';
+    input.style.cssText = 'width:100%;padding:11px 14px;border:1px solid var(--border);border-radius:9px;font-size:14px;margin-bottom:12px';
+    sBox.appendChild(input);
+
+    var filters = h('div', 'segment');
+    filters.style.marginBottom = '12px';
+    sBox.appendChild(filters);
+
+    var listBox = h('div');
+    sBox.appendChild(listBox);
+    box.appendChild(sBox);
+
+    var state = { q: '', lv: 'ALL', theme: 'ALL', status: 'ALL', page: 0 };
+    var PAGE = 120;
+
+    var FILTERS = [
+      {
+        k: 'lv', opts: [['ALL', '全部等级']].concat(LEVELS_ALL.map(function (id) {
+          return [id, id + ' ' + global.PathContent.levelById(id).name];
+        }))
+      },
+      { k: 'status', opts: [['ALL', '全部状态'], ['new', '未学'], ['learning', '学习中'], ['mature', '已掌握']] }
+    ];
+    var filterBtns = {};
+
+    FILTERS.forEach(function (f) {
+      f.opts.forEach(function (o) {
+        var b = h('button', o[0] === state[f.k] ? 'on' : null, o[1]);
+        b.type = 'button';
+        b.dataset.k = f.k; b.dataset.v = o[0];
+        b.onclick = function () {
+          state[f.k] = o[0];
+          state.page = 0;
+          ui.$$('button', filters).forEach(function (x) { x.classList.remove('on'); });
+          b.classList.add('on');
+          if (f.k === 'lv') { rebuildTheme(); }
+          // L5/L6 词库按需加载（约 415KB）
+          if (f.k === 'lv' && (o[0] === 'L5' || o[0] === 'L6')) {
+            var label = b.textContent;
+            b.disabled = true;
+            b.textContent = o[1] + ' 加载中…';
+            S.ensureLevel(o[0]).then(function () {
+              b.disabled = false;
+              b.textContent = label;
+              renderList();
+            });
+            return;
+          }
+          renderList();
+        };
+        filterBtns[f.k + ':' + o[0]] = b;
+        filters.appendChild(b);
+      });
+    });
+
+    var themeSel = h('select', 'input');
+    themeSel.style.cssText = 'max-width:190px;margin-left:12px';
+    filters.appendChild(themeSel);
+
+    function rebuildTheme() {
+      themeSel.innerHTML = '';
+      var lvs = state.lv === 'ALL' ? LEVELS_ALL : [state.lv];
+      var names = {};
+      lvs.forEach(function (lv) {
+        VC.themesOf(lv).forEach(function (t) { names[t] = (names[t] || 0) + 1; });
+      });
+      ['ALL'].concat(Object.keys(names).sort()).forEach(function (t) {
+        var o = h('option', null, t === 'ALL' ? '全部主题' : t);
+        o.value = t;
+        themeSel.appendChild(o);
+      });
+      state.theme = 'ALL';
+    }
+    rebuildTheme();
+    themeSel.onchange = function () { state.theme = themeSel.value; state.page = 0; renderList(); };
+
+    input.oninput = function () { state.q = input.value.trim(); state.page = 0; renderList(); };
+
+    function currentList() {
+      var pool = loaded();
+      if (state.lv !== 'ALL') pool = pool.filter(function (w) { return w.lv === state.lv; });
+      if (state.theme !== 'ALL') pool = pool.filter(function (w) { return w.th === state.theme; });
+      if (state.status !== 'ALL') {
+        pool = pool.filter(function (w) {
+          var c = S.state.words[w.id];
+          if (!c) return state.status === 'new';
+          if (state.status === 'learning') return c.ivl < 21;
+          if (state.status === 'mature') return c.ivl >= 21;
+          return true;
+        });
+      }
+      if (state.q) {
+        var lower = state.q.toLowerCase();
+        pool = pool.filter(function (w) {
+          return (w.w && w.w.toLowerCase().indexOf(lower) >= 0)
+            || (w.cn && String(w.cn).toLowerCase().indexOf(lower) >= 0);
+        });
+        pool.sort(function (a, b) {
+          var aw = a.w.toLowerCase(), bw = b.w.toLowerCase();
+          var sa = aw === lower ? 0 : aw.indexOf(lower) === 0 ? 1 : 2;
+          var sb = bw === lower ? 0 : bw.indexOf(lower) === 0 ? 1 : 2;
+          return sa !== sb ? sa - sb : aw.length - bw.length;
+        });
+      }
+      return pool;
+    }
+
+    function renderList() {
+      global.UI.clear(listBox);
+      var list = currentList();
+
+      var total = S.vocabTotalCount();
+      var info = h('div');
+      info.style.cssText = 'font-size:13px;color:var(--text-2);margin-bottom:12px';
+      var loadedCount = loaded().length;
+      var tail = loadedCount < total
+        ? '（另有 ' + (total - loadedCount) + ' 词在 L5/L6 分片中，用上方等级筛选可加载）'
+        : '';
+      info.textContent = '当前显示 ' + list.length + ' 个词 · 全库共 ' + total + ' 词' + tail;
+      listBox.appendChild(info);
+
+      if (!list.length) {
+        var e = h('div', 'empty-state');
+        e.appendChild(h('div', 'e-ico', '🔍'));
+        e.appendChild(h('div', 'e-txt', state.q
+          ? '没有找到匹配的词。换个关键词试试。'
+          : '该筛选条件下没有词。试试放宽条件。'));
+        listBox.appendChild(e);
+        return;
+      }
+
+      var pages = Math.max(1, Math.ceil(list.length / PAGE));
+      if (state.page >= pages) state.page = pages - 1;
+      var slice = list.slice(state.page * PAGE, (state.page + 1) * PAGE);
+
+      var tbl = h('table', 'tbl stackable');
+      var thead = h('thead');
+      var tr = h('tr');
+      var LABELS = ['单词', '音标', '释义', '等级', '主题', '状态', ''];
+      LABELS.forEach(function (x) {
+        tr.appendChild(h('th', null, x));
+      });
+      thead.appendChild(tr);
+      tbl.appendChild(thead);
+      var tb = h('tbody');
+
+      slice.forEach(function (w) {
+        var r = h('tr');
+        // data-label 让窄屏下每个单元格能显示对应表头
+        r.setAttribute('data-w', w.w);
+        var c0 = h('td');
+        c0.setAttribute('data-label', LABELS[0]);
+        var bw = h('b', null, w.w);
+        bw.style.cursor = 'pointer';
+        bw.onclick = function () { ui.tts.speak(w.w); };
+        c0.appendChild(bw);
+        var sp = h('button', 'mini-btn', '🔊');
+        sp.style.marginLeft = '6px';
+        sp.onclick = function () { ui.tts.speak(w.w); };
+        c0.appendChild(sp);
+        r.appendChild(c0);
+
+        var c1 = h('td', null, w.ipa || '—');
+        c1.setAttribute('data-label', LABELS[1]);
+        c1.style.cssText = 'font-family:var(--mono);font-size:12px;color:var(--primary-dark)';
+        r.appendChild(c1);
+
+        var c2 = h('td', null, w.cn || '—');
+        c2.setAttribute('data-label', LABELS[2]);
+        r.appendChild(c2);
+
+        var c3 = h('td', null, w.lv);
+        c3.setAttribute('data-label', LABELS[3]);
+        c3.style.cssText = 'font-size:11.5px;font-weight:700;color:' +
+          (w.lv === 'L1' ? '#22b07d' : w.lv === 'L2' ? '#4f7cff' : w.lv === 'L3' ? '#f0a020' :
+            w.lv === 'L4' ? '#e2585f' : w.lv === 'L5' ? '#8b5cf6' : '#ec4899');
+        r.appendChild(c3);
+
+        var c4 = h('td', null, w.th || '—');
+        c4.setAttribute('data-label', LABELS[4]);
+        c4.style.cssText = 'font-size:11.5px;color:var(--text-3);max-width:130px';
+        r.appendChild(c4);
+
+        var c5 = h('td');
+        c5.setAttribute('data-label', LABELS[5]);
+        var card = S.state.words[w.id];
+        var tag = h('span', null, card ? (card.ivl >= 21 ? '已掌握' : '学习中') : '未学');
+        tag.style.cssText = 'font-size:11px;font-weight:700;color:' +
+          (!card ? 'var(--text-3)' : card.ivl >= 21 ? '#17805a' : '#b8790f');
+        c5.appendChild(tag);
+        r.appendChild(c5);
+
+        var c6 = h('td');
+        c6.setAttribute('data-label', '');
+        var add = h('button', 'mini-btn', card ? '已在队列' : '加入学习');
+        add.disabled = !!card;
+        if (!card) {
+          add.onclick = function () {
+            S.initNewWord(w.id);
+            S.save(true);
+            ui.toast('已加入：' + w.w);
+            renderList();
+          };
+        }
+        c6.appendChild(add);
+        r.appendChild(c6);
+
+        tb.appendChild(r);
+      });
+      tbl.appendChild(tb);
+      listBox.appendChild(tbl);
+
+      // 分页
+      var pg = h('div');
+      pg.style.cssText = 'display:flex;align-items:center;justify-content:center;gap:10px;margin-top:14px;flex-wrap:wrap';
+      var prev = h('button', 'btn sm ghost', '← 上一页');
+      var info2 = h('span', null, '第 ' + (state.page + 1) + ' / ' + pages + ' 页');
+      info2.style.cssText = 'font-size:12.5px;color:var(--text-3)';
+      var next = h('button', 'btn sm ghost', '下一页 →');
+      prev.disabled = state.page === 0;
+      next.disabled = state.page === pages - 1;
+      prev.onclick = function () { state.page--; renderList(); window.scrollTo(0, listBox.offsetTop - 80); };
+      next.onclick = function () { state.page++; renderList(); window.scrollTo(0, listBox.offsetTop - 80); };
+      pg.appendChild(prev); pg.appendChild(info2); pg.appendChild(next);
+      listBox.appendChild(pg);
+    }
+
+    renderList();
+  }
+
   function reviewView(root) {
     var due = S.dueReviews(S.state.settings.dailyReviewCap);
     var head = h('div', 'page-head');
@@ -413,10 +678,14 @@
     row.style.cssText = 'display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:14px';
     var seg = h('div', 'segment');
     LEVELS_ALL.forEach(function (id) {
-      var b = h('button', id === lv ? 'on' : null, id + ' ' + global.PathContent.levelById(id).name);
+      var locked = !S.state.unlocked[id];
+      var b = h('button', id === lv ? 'on' : null,
+        id + ' ' + global.PathContent.levelById(id).name + (locked ? ' 🔒' : ''));
+      if (locked) b.classList.add('locked');
+      b.title = locked ? '未在推荐路径内，但词表仍可自由学习' : '';
       b.onclick = function () {
-        if (!S.state.unlocked[id]) { ui.toast('完成上一阶段里程碑后解锁 ' + id); return; }
-        // 切换等级：仅更新选中态并重渲染词表，绝不重复调用 newView（否则会叠加 DOM）
+        // 词库全量开放：所有等级的词表都可随时查看与学习。
+        // 锁定只表示「不推荐在这个阶段学」——路径是建议顺序，不是权限。
         // L5/L6 首次进入需先加载对应词库（约 415KB），加载后再渲染
         levelOverride = id;
         $$('.segment button', seg).forEach(function (x) { x.classList.remove('on'); });
@@ -426,7 +695,7 @@
           b.textContent = id + ' 加载中…';
           S.ensureLevel(id).then(function () {
             b.disabled = false;
-            b.textContent = id + ' ' + global.PathContent.levelById(id).name;
+            b.textContent = id + ' ' + global.PathContent.levelById(id).name + (locked ? ' 🔒' : '');
             syncThemeOptions();
             render();
           });
@@ -438,6 +707,97 @@
       seg.appendChild(b);
     });
     row.appendChild(seg);
+
+    /* ---- 全库搜索：不受等级限制，任何时候都能查任意词 ---- */
+    var searchWrap = h('div');
+    searchWrap.style.cssText = 'display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px';
+    var searchIn = h('input', 'input');
+    searchIn.type = 'search';
+    searchIn.placeholder = '搜索全部 5449 词（支持英文 / 中文 / 模糊匹配）';
+    searchIn.style.cssText = 'flex:1;min-width:220px;padding:9px 13px;border:1px solid var(--border);border-radius:9px;font-size:13.5px';
+    var searchBtn = h('button', 'btn sm', '搜索');
+    searchBtn.type = 'button';
+    searchWrap.appendChild(searchIn);
+    searchWrap.appendChild(searchBtn);
+    row.appendChild(searchWrap);
+
+    var resultBox = h('div');
+    root.appendChild(resultBox);
+
+    function doSearch() {
+      global.UI.clear(resultBox);
+      var q = searchIn.value.trim();
+      if (!q) return;
+      var pool = allWords();
+      var lower = q.toLowerCase();
+      var hits = pool.filter(function (w) {
+        return (w.w && w.w.toLowerCase().indexOf(lower) >= 0)
+          || (w.cn && String(w.cn).toLowerCase().indexOf(lower) >= 0);
+      });
+      // 按精确匹配 → 前缀匹配 → 包含匹配排序
+      hits.sort(function (a, b) {
+        var aw = a.w.toLowerCase(), bw = b.w.toLowerCase();
+        var sa = aw === lower ? 0 : aw.indexOf(lower) === 0 ? 1 : 2;
+        var sb = bw === lower ? 0 : bw.indexOf(lower) === 0 ? 1 : 2;
+        return sa !== sb ? sa - sb : aw.length - bw.length;
+      });
+      var total = hits.length;
+      hits = hits.slice(0, 60);
+
+      var head = h('div');
+      head.style.cssText = 'font-size:13px;color:var(--text-2);margin-bottom:10px';
+      head.textContent = '找到 ' + total + ' 个匹配' + (total > 60 ? '（仅显示前 60）' : '');
+      resultBox.appendChild(head);
+
+      if (!hits.length) {
+        var e = h('div', 'empty-state');
+        e.appendChild(h('div', 'e-ico', '🔍'));
+        e.appendChild(h('div', 'e-txt', '没有找到匹配的词。试试更短的关键词。'));
+        resultBox.appendChild(e);
+        return;
+      }
+
+      var g = h('div', 'grid');
+      g.style.gridTemplateColumns = 'repeat(auto-fill,minmax(190px,1fr))';
+      hits.forEach(function (w) {
+        var card = h('div');
+        card.style.cssText = 'padding:11px 13px;border:1px solid var(--border);border-radius:10px;background:var(--surface)';
+        var top = h('div');
+        top.style.cssText = 'display:flex;align-items:baseline;gap:7px;flex-wrap:wrap';
+        var bw = h('b', null, w.w);
+        bw.style.cssText = 'font-size:15px;cursor:pointer';
+        bw.onclick = function () { ui.tts.speak(w.w); };
+        top.appendChild(bw);
+        var sp = h('button', 'mini-btn', '🔊');
+        sp.style.fontSize = '11px';
+        sp.onclick = function (e) { e.stopPropagation(); ui.tts.speak(w.w); };
+        top.appendChild(sp);
+        var lvTag = h('span', 'tag grey', w.lv);
+        lvTag.style.fontSize = '10px';
+        top.appendChild(lvTag);
+        if (S.state.words[w.id]) {
+          var seen = h('span', null, '已学');
+          seen.style.cssText = 'font-size:10px;color:#17805a;font-weight:700';
+          top.appendChild(seen);
+        }
+        card.appendChild(top);
+        if (w.ipa) {
+          var ip = h('div', null, w.ipa);
+          ip.style.cssText = 'font-family:var(--mono);font-size:12px;color:var(--primary-dark);margin-top:3px';
+          card.appendChild(ip);
+        }
+        if (w.cn) {
+          var cn = h('div', null, w.cn);
+          cn.style.cssText = 'font-size:12.5px;color:var(--text-2);margin-top:2px';
+          card.appendChild(cn);
+        }
+        g.appendChild(card);
+      });
+      resultBox.appendChild(g);
+    }
+
+    searchBtn.onclick = doSearch;
+    searchIn.onkeydown = function (e) { if (e.key === 'Enter') doSearch(); };
 
     var themeSel = h('select', 'input');
     themeSel.style.cssText = 'max-width:200px';
@@ -920,6 +1280,7 @@
   var TABS = [
     { id: 'review', label: '今日复习', fn: reviewView, desc: '按 SM-2 队列提取复习' },
     { id: 'new', label: '学新词', fn: newView, desc: '分等级分主题的词表' },
+    { id: 'browse', label: '全库浏览', fn: browseView, desc: '5449 词全部开放，随时查阅' },
     { id: 'quiz', label: '自测', fn: quizView, desc: '动态生成测验' },
     { id: 'core', label: '核心词精讲', fn: coreView, desc: '高频功能词详解' }
   ];

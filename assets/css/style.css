@@ -424,6 +424,18 @@ a { color: var(--primary); text-decoration: none; }
 .segment button:hover { color: var(--text); }
 .segment button.on { background: var(--surface); color: var(--primary-dark); box-shadow: 0 1px 3px rgba(16, 24, 40, .1); }
 
+/* 未在推荐路径内的等级：仍可点开查阅，用虚线+淡色区分而非禁用 */
+.segment button.locked {
+  opacity: .62;
+  border: 1px dashed var(--border);
+}
+.segment button.locked:hover { opacity: .9; background: var(--surface-2); }
+.segment button.locked.on {
+  opacity: 1;
+  border: 1px solid var(--primary);
+  background: var(--surface);
+}
+
 /* ---------------- 表格 ---------------- */
 .tbl { width: 100%; border-collapse: collapse; font-size: 13.5px; }
 .tbl th {
@@ -433,6 +445,31 @@ a { color: var(--primary); text-decoration: none; }
 .tbl td { padding: 10px 11px; border-bottom: 1px solid var(--surface-2); }
 .tbl tr:last-child td { border-bottom: none; }
 .tbl tr:hover td { background: var(--surface-2); }
+
+/* 多列表格（词库浏览等）在窄屏会撑破视口。
+   移动端把每行转为卡片：单元格竖排并用 data-label 显示表头。 */
+@media (max-width: 640px) {
+  .tbl.stackable { display: block; }
+  .tbl.stackable thead { display: none; }
+  .tbl.stackable tbody,
+  .tbl.stackable tr,
+  .tbl.stackable td { display: block; width: 100%; }
+  .tbl.stackable tr {
+    border: 1px solid var(--border); border-radius: 10px;
+    padding: 6px 0; margin-bottom: 10px; background: var(--surface);
+  }
+  .tbl.stackable td {
+    border-bottom: none; padding: 5px 12px;
+    display: flex; align-items: baseline; gap: 10px;
+  }
+  .tbl.stackable td::before {
+    content: attr(data-label);
+    flex: 0 0 62px;
+    font-size: 11px; color: var(--text-3); font-weight: 600;
+  }
+  .tbl.stackable td[data-label='']::before { content: none; }
+  .tbl.stackable tr:hover td { background: transparent; }
+}
 
 /* ---------------- 学习路径时间轴 ---------------- */
 .timeline { position: relative; padding-left: 30px; }
