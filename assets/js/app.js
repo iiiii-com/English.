@@ -223,6 +223,14 @@
     head.appendChild(sub);
     root.appendChild(head);
 
+    /* 品牌注脚：拉丁词源 + 同源词。
+       放在这里而不是设置页，是因为词根模块本身就是站内内容——
+       站名和词根互为呼应，是最省力的品牌表达。 */
+    var sig = h('div', 'brand-sig');
+    sig.innerHTML = '<span class="bs-word">Lumen</span>' +
+      '<span class="bs-note">拉丁语 <i>lumen</i>，光。同源词 illuminate · luminous · luminance。</span>';
+    root.appendChild(sig);
+
     /* ---- 统计卡 ---- */
     var g = h('div', 'grid g4');
     g.appendChild(statCard('主动词汇量', v.seenTotal, '词', 'mature 成熟 ' + v.mature + ' · learning 学习中 ' + v.learning, 'accent-primary'));
@@ -826,6 +834,20 @@
       if (on) b.setAttribute('aria-current', 'page');
       else b.removeAttribute('aria-current');
     });
+    var curStage = stageOf(current);
+    if (curStage) {
+      var nav = $('#nav');
+      if (nav) nav.setAttribute('data-stage', curStage.num);
+      // 阶段标题同步到页面顶部，让用户始终知道自己在哪一阶段
+      var stageBar = $('#stageBar');
+      if (stageBar) {
+        stageBar.textContent = curStage.num + ' · ' + curStage.name;
+        stageBar.title = curStage.desc;
+      }
+    }
+    // 选中项滚入视野：横向滚动导航在移动端能露出 3-4 项，
+    // 切到靠后的页面时若不滚动，用户会完全看不到自己在哪
+    scrollNavToActive();
     var chip = $('#streakChip');
     if (chip) {
       var stk = S.streak();
@@ -836,30 +858,107 @@
     if (global.innerWidth < 760) global.scrollTo(0, 0);
   }
 
-  var NAV = [
-    { id: 'dash', label: '总览', group: '学习' },
-    { id: 'path', label: '等级路径', group: '学习' },
-    { id: 'vocab', label: '词汇', group: '学习' },
-    { id: 'english', label: '英语资料', group: '学习' },
-    { id: 'phoneme', label: '音标口型', group: '学习' },
-    { id: 'progress', label: '学习记忆', group: '学习' },
-    { id: 'account', label: '账号同步', group: '学习' },
-    { id: 'speak', label: '口语', group: '学习' },
-    { id: 'dailycomm', label: '日常交流', group: '学习' },
-    { id: 'read', label: '阅读', group: '学习' },
-    { id: 'psych', label: '心理机制', group: '原理' },
-    { id: 'data', label: '数据模型', group: '原理' }
+  /* ============================================================
+     导航结构：按「认知输入 → 理解解析 → 场景运用 → 审美拓展」四阶段组织
+
+     这样排序的理由是语言习得的真实顺序：
+       认知输入 —— 先见过、知道有这么个东西（词汇、发音、资料）
+       理解解析 —— 再搞懂它为什么长这样、能怎么推（词根、音标、原理）
+       场景运用 —— 然后用出去，在真实语境里活起来（口语、日常、阅读）
+       审美拓展 —— 最后抵达审美，语言的密度与余韵（诗歌、名句）
+
+     每个阶段内的模块层级统一：
+       stage 阶段名（罗马数字 + 中文）
+       group 分组标签（导航第二行）
+     ============================================================ */
+
+  /** 把当前选中项滚进可视区。只在真需要时动，避免整条导航反复重置位置 */
+  function scrollNavToActive() {
+    var nav = $('#nav');
+    if (!nav) return;
+    var on = nav.querySelector('button.on');
+    if (!on) return;
+    // 已经完整可见就不动
+    var nl = nav.getBoundingClientRect();
+    var ol = on.getBoundingClientRect();
+    var pad = 24;
+    if (ol.left >= nl.left + pad && ol.right <= nl.right - pad) return;
+    nav.scrollTo({
+      left: on.offsetLeft - (nav.clientWidth - on.offsetWidth) / 2,
+      behavior: 'smooth'
+    });
+  }
+  var STAGES = [
+    { id: 's1', num: 'I', name: '认知输入', desc: '先见过，知道有这么个东西' },
+    { id: 's2', num: 'II', name: '理解解析', desc: '搞懂为什么，怎么推' },
+    { id: 's3', num: 'III', name: '场景运用', desc: '用出去，在语境里活起来' },
+    { id: 's4', num: 'IV', name: '审美拓展', desc: '抵达语言的密度与余韵' }
   ];
 
+  var NAV = [
+    /* ---- I 认知输入 ---- */
+    { id: 'dash', label: '总览', group: 'I 认知输入' },
+    { id: 'path', label: '等级路径', group: 'I 认知输入' },
+    { id: 'vocab', label: '词汇', group: 'I 认知输入' },
+    { id: 'english', label: '英语资料', group: 'I 认知输入' },
+
+    /* ---- II 理解解析 ---- */
+    { id: 'roots', label: '词根词缀', group: 'II 理解解析' },
+    { id: 'phoneme', label: '音标口型', group: 'II 理解解析' },
+    { id: 'psych', label: '心理机制', group: 'II 理解解析' },
+    { id: 'progress', label: '学习记忆', group: 'II 理解解析' },
+
+    /* ---- III 场景运用 ---- */
+    { id: 'speak', label: '口语', group: 'III 场景运用' },
+    { id: 'dailycomm', label: '日常交流', group: 'III 场景运用' },
+    { id: 'read', label: '阅读', group: 'III 场景运用' },
+
+    /* ---- IV 审美拓展 ---- */
+    { id: 'poetry', label: '诗歌名句', group: 'IV 审美拓展' },
+
+    /* ---- 工具与设置（不参与四阶段） ---- */
+    { id: 'tttsettings', label: '发音设置', group: '工具' },
+    { id: 'account', label: '账号同步', group: '工具' },
+    { id: 'data', label: '数据模型', group: '工具' }
+  ];
+
+  /** 供其他模块引用：当前处于第几阶段 */
+  function stageOf(viewId) {
+    var n = NAV.filter(function (x) { return x.id === viewId; })[0];
+    if (!n) return null;
+    var g = n.group;
+    for (var i = 0; i < STAGES.length; i++) {
+      if (g.indexOf(STAGES[i].num) === 0) return STAGES[i];
+    }
+    return null;
+  }
+
+
+  /**
+   * 构建导航：按阶段插入分组标题，让四阶段结构在视觉上直接可读。
+   * 不分组的话 15 个按钮平铺，用户看不出学习路径。
+   */
   function buildNav() {
     var nav = $('#nav');
+    var lastGroup = null;
+
     NAV.forEach(function (n) {
+      if (n.group !== lastGroup) {
+        lastGroup = n.group;
+        var g = h('span', 'nav-group', n.group);
+        g.dataset.g = n.group;
+        nav.appendChild(g);
+      }
       var b = h('button', null, n.label);
       b.dataset.v = n.id;
       b.setAttribute('aria-label', n.label);
       b.onclick = function () { current = n.id; location.hash = n.id; render(); };
       nav.appendChild(b);
     });
+
+    // 标记当前阶段，方便样式上突出
+    var cur = stageOf(current);
+    if (cur) nav.setAttribute('data-stage', cur.num);
   }
 
   /* ---------- 全局错误边界 ----------
@@ -884,19 +983,61 @@
     root.appendChild(tip);
   }
 
+  /* 代理发音地址解析。
+     优先级：
+       1. 用户在设置里手填的（localStorage.ttsProxy）
+       2. 同源部署 —— 正式上线后把 tts-server 挂在同域的 /tts 下即可，不用改代码
+       3. 本机开发端口 8788
+     Android App 走的是 file:// 或本地 asset，同源那条不成立，
+     会落到 127.0.0.1:8788 —— 前提是手机上也有代理在监听，
+     这在设置页有对应的开关和状态显示。 */
+  function resolveTTSProxy() {
+    var custom = '';
+    try { custom = String(localStorage.getItem('lumen.ttsProxy') || '').trim(); } catch (e) {}
+    if (custom === 'off') return '';
+    if (custom) return custom;
+    // 与页面同源且不是本地文件协议时，假设 /tts 是代理挂载点
+    if (location.protocol === 'http:' || location.protocol === 'https:') {
+      if (location.hostname !== '127.0.0.1' && location.hostname !== 'localhost') {
+        return location.origin + '/tts';
+      }
+      return 'http://127.0.0.1:8788';
+    }
+    /* App 内（file:// 载入本地资源）：默认不配代理。
+       App 有原生 TTS 引擎，能读整句、零延迟、离线可用。
+       手机上通常不会跑着这个 Node 服务，若配上代理地址，
+       原生一旦未就绪就会先白等 8 秒超时才回落——反而更差。
+       真要用代理，可以在设置页手填地址（localStorage.lumen.ttsProxy）。*/
+    return '';
+  }
+
   function init() {
     if (global.__booted) return;
     global.__booted = true;
     S.init();
     if (global.Progress) global.Progress.init();
-    if (global.TTS) global.TTS.init();
+    if (global.TTS) {
+      // 必须在 init 之前配置：init 会做一次语音可用性评估，
+      // 顺序反了会导致首屏显示"无英语语音"的错误提示。
+      try { global.TTS.setProxy(resolveTTSProxy()); } catch (e) {}
+      global.TTS.init();
+    }
     if (global.PWA) global.PWA.init();
     buildNav();
     window.addEventListener('hashchange', function () {
-      var id = location.hash.slice(1);
-      if (id && views[id] && id !== current) { current = id; render(); }
+      var raw = location.hash.slice(1);
+      // hash 可能带参数：vocab?w=inspect
+      var id = raw.split('?')[0];
+      if (id && views[id] && id !== current) {
+        current = id;
+        render();
+      }
+      // 无论是否切了视图都要处理参数：
+      // 切了视图时参数要等新视图渲染完才能落点（focusWord 依赖 vocabBody）
+      applyHashParam(raw);
     });
-    var initId = location.hash.slice(1);
+    var initRaw = location.hash.slice(1);
+    var initId = initRaw.split('?')[0];
     if (initId && views[initId]) current = initId;
 
     // 云服务：初始化并在已有会话时开启自动同步。
@@ -909,6 +1050,27 @@
 
     // 其他视图模块已通过 global.Views 自行注册
     render();
+    applyHashParam(initRaw);
+  }
+
+  /* 消费 hash 上的参数：vocab?w=inspect
+     划词取词弹层里的「在词汇模块查看完整讲解」会带这个词跳过来，
+     这里在渲染完成后定位到该词并高亮，把「查一下」和「看讲解」接上。 */
+  function applyHashParam(raw) {
+    var m = /[?&]w=([^&]+)/.exec(raw || '');
+    if (!m) return;
+    var w = decodeURIComponent(m[1] || '');
+    if (!w) return;
+    // 渲染是同步的，但视图切换 / 词库分片可能还没就绪，做有限次重试
+    var tries = 0;
+    function attempt() {
+      if (global.VocabView && typeof global.VocabView.focusWord === 'function') {
+        global.VocabView.focusWord(w);
+        return;
+      }
+      if (++tries < 20) setTimeout(attempt, 60);
+    }
+    setTimeout(attempt, 80);
   }
 
   global.App = { init: init, render: render, views: views, checkUnlockNow: checkUnlock };

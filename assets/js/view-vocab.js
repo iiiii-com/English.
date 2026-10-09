@@ -13,6 +13,9 @@
     var out = [];
     if (global.GAOKAO_L5) out = out.concat(global.GAOKAO_L5.words);
     if (global.GAOKAO_L6) out = out.concat(global.GAOKAO_L6.words);
+    // 音标/搭配/易混辨析的补全已在数据层（content-vocab-deep1/2/3.js）做完，
+    // 并且它们包装了 Store.ensureLevel，所以分片懒加载后也会自动补齐。
+    // 这里不再重复处理——多一处就多一个不同步的隐患。
     return base.concat(out);
   }
   /** 词库统计信息（取自 meta，含未加载等级，不受懒加载影响） */
@@ -1199,6 +1202,26 @@
         tp.style.cssText = 'font-size:12.5px;color:var(--text-2);background:var(--warn-soft);padding:8px 11px;border-radius:8px;line-height:1.65;margin-bottom:9px';
         card.appendChild(tp);
       }
+      if (c.coll) {
+        var clb = h('div', 'vocab-coll');
+        var clMain = h('div', 'vocab-coll-main');
+        clMain.appendChild(h('span', 'cl-label', '搭配'));
+        var clbEn = h('b', null, c.coll[0]);
+        clbEn.style.cursor = 'pointer';
+        clbEn.onclick = function () { ui.tts.speak(c.coll[0]); };
+        clMain.appendChild(clbEn);
+        var clSp = h('span', 'chip-speak', '🔊');
+        clSp.onclick = function () { ui.tts.speak(c.coll[0]); };
+        clMain.appendChild(clSp);
+        clb.appendChild(clMain);
+        if (c.coll[1]) {
+          var clNote = h('div', 'vocab-coll-note');
+          clNote.textContent = c.coll[1];
+          if (c.coll[2]) clNote.appendChild(h('span', 'tag grey', c.coll[2]));
+          clb.appendChild(clNote);
+        }
+        card.appendChild(clb);
+      }
       if (c.forms) {
         var fw = h('div');
         fw.style.cssText = 'display:flex;gap:6px;flex-wrap:wrap;margin-bottom:9px';
@@ -1335,5 +1358,159 @@
     renderVocab();
   };
 
-  global.VocabView = { switchTab: switchTab, wordById: wordById, posCn: posCn, showIpaDetail: showIpaDetail };
+  /* ============================================================
+     把 VocabDeep 的深层讲解并入 CORE 词表
+     ------------------------------------------------------------
+     VocabDeep（搭配 / 易混辨析）是为高频短语准备的，
+     CORE 里有一部分就是短语（look into / end up / used to…）。
+     这里做一次性合并：只补空缺，不覆盖 CORE 自带的内容。
+     ============================================================ */
+  (function mergeDeep() {
+    if (!global.VocabDeepAny || !VC.CORE) return;
+    VC.CORE.forEach(function (c) {
+      var d = global.VocabDeepAny.get(c.w);
+      if (!d) return;
+      if (d.ipa && !c.ipa) c.ipa = d.ipa;
+      if (d.coll && !c.coll) c.coll = d.coll;
+      if (d.confuse && !c.confuse) c.confuse = d.confuse;
+    });
+  })();
+
+  global.VocabView = { switchTab: switchTab, wordById: wordById, posCn: posCn, showIpaDetail: showIpaDetail, focusWord: focusWord };
+
+  /* ============================================================
+     focusWord(w) —— 「划词取词 → 完整讲解」的落点
+     ------------------------------------------------------------
+     划词弹层里的「在词汇模块查看完整讲解」会带一个词跳过来。
+     这里切到全库浏览，定位到该词条目并高亮滚动，
+     这样「查一下 → 看讲解」才是真的接上，而不是只换个页面。
+
+     词条很多时逐页查找会翻不到，所以先用词表建立索引，
+     找到所在分组后再切，否则只在当前 DOM 里 find。
+     ============================================================ */
+  function focusWord(w) {
+    w = String(w || '').trim().toLowerCase();
+    if (!w) return false;
+
+    // 视图可能还没渲染完（hashchange 里 render 是同步的，但调用方会延迟调用）
+    var body = document.getElementById('vocabBody');
+    if (!body) return false;
+
+    // 目标词可能不在当前 tab，切到 browse（体量最大、最可能收录）
+    curTab = 'browse';
+    switchTab('browse');
+
+    body = document.getElementById('vocabBody');
+    if (!body) return false;
+
+    // 1) 先看当前已渲染的 DOM 里有没有
+    var hit = findEntry(body, w);
+    if (hit) { mark(hit, w); return true; }
+
+    // 2) DOM 里没有：直接查词库。
+    //    不走浏览器的搜索框——它只搜「已加载」的部分，
+    //    高考词（L5/L6 分片）会搜不到，等于把用户引到一个空列表。
+    var entry = lookupInPools(w);
+    if (!entry) {
+      ui.toast('词汇库里暂时没有「' + w + '」的详细条目', { ms: 2600, type: 'info' });
+      return false;
+    }
+    renderEntryCard(body, entry, w);
+    return true;
+  }
+
+  /** 在已加载的词库分片里精确查词 */
+  function lookupInPools(w) {
+    var pools = [
+      (global.VOCAB_DATA && global.VOCAB_DATA.words) || [],
+      (global.GAOKAO_L5 && global.GAOKAO_L5.words) || [],
+      (global.GAOKAO_L6 && global.GAOKAO_L6.words) || []
+    ];
+    for (var i = 0; i < pools.length; i++) {
+      for (var j = 0; j < pools[i].length; j++) {
+        if (String(pools[i][j].w || '').toLowerCase() === w) return pools[i][j];
+      }
+    }
+    return null;
+  }
+
+  /** 词库里查到但当前列表没渲染出来时，单独插一张详情卡 */
+  function renderEntryCard(body, entry, w) {
+    var card = h('div', 'card');
+    card.appendChild(h('div', 'poem-sec-head', '从划词取词直接跳转'));
+    var top = h('div', 'lk-head');
+    top.appendChild(h('span', 'lk-w', entry.w || w));
+    if (entry.ipa) top.appendChild(h('span', 'lk-ipa', entry.ipa));
+    var pos = entry.pos || entry.p;
+    if (pos) top.appendChild(h('span', 'tag', pos));
+    var sp = h('span', 'chip-speak', '🔊');
+    sp.onclick = function () { ui.tts.speak(entry.w || w); };
+    top.appendChild(sp);
+    card.appendChild(top);
+    if (entry.cn) card.appendChild(h('div', 'lk-cn', entry.cn));
+    if (entry.en) card.appendChild(h('div', 'lk-en', entry.en));
+    if (entry.tip) {
+      var tip = h('div', 'lk-tip');
+      tip.appendChild(h('span', 'tip-icon', '💡'));
+      tip.appendChild(h('span', 'tip-text', entry.tip));
+      card.appendChild(tip);
+    }
+    var ex = normEx(entry.ex);
+    ex.forEach(function (pair) {
+      var row = h('div', 'lk-ex');
+      var t = h('div', 'lk-ex-top');
+      t.appendChild(h('span', 'lk-ex-en', pair[0]));
+      var s2 = h('span', 'chip-speak', '🔊');
+      s2.onclick = function () { ui.tts.speak(pair[0]); };
+      t.appendChild(s2);
+      row.appendChild(t);
+      if (pair[1]) row.appendChild(h('div', 'lk-ex-cn', pair[1]));
+      card.appendChild(row);
+    });
+    // 插到列表最前面，并高亮
+    body.insertBefore(card, body.firstChild);
+    card.classList.add('lk-hit');
+    card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    ui.toast('已定位到「' + (entry.w || w) + '」', { ms: 1800, type: 'info' });
+  }
+
+  function normEx(raw) {
+    var out = [];
+    if (!raw) return out;
+    (Array.isArray(raw) ? raw : [raw]).forEach(function (it) {
+      if (Array.isArray(it)) { if (it.length) out.push([String(it[0] || ''), String(it[1] || '')]); return; }
+      var s = String(it || '').trim();
+      if (!s) return;
+      var m = /^(.+?)\s*[|｜：:]\s*(.+)$/.exec(s);
+      if (m) out.push([m[1].trim(), m[2].trim()]);
+      else out.push([s, '']);
+    });
+    return out.filter(function (p) { return p[0]; });
+  }
+
+  function mark(node, w) {
+    if (!node) return;
+    var card = node.closest ? (node.closest('.card, .entry, .w-card, li, tr') || node) : node;
+    if (card.classList) {
+      card.classList.remove('lk-hit');
+      void card.offsetWidth;   // 强制重排，让重复点击也能重播动画
+      card.classList.add('lk-hit');
+      card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+    ui.toast('已在全库浏览中定位「' + w + '」', { ms: 1800, type: 'info' });
+  }
+
+
+  function findEntry(scope, w) {
+    var nodes = scope.querySelectorAll('[data-w]');
+    for (var i = 0; i < nodes.length; i++) {
+      if (String(nodes[i].dataset.w || '').toLowerCase() === w) return nodes[i];
+    }
+    // 没有 data-w 标记时退回文本匹配
+    var all = scope.querySelectorAll('b, strong, h3, h4, .en, .w');
+    for (var j = 0; j < all.length; j++) {
+      if (String(all[j].textContent || '').trim().toLowerCase() === w) return all[j];
+    }
+    return null;
+  }
 })(window);

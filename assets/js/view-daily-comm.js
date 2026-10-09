@@ -25,7 +25,7 @@
     tab.id = 'dcTabs';
     tab.style.marginBottom = '16px';
     var cur = 'browse';
-    [['browse', '分类浏览'], ['drill', '场景演练'], ['random', '随机抽句']].forEach(function (t) {
+    [['browse', '分类浏览'], ['dialog', '对话示例'], ['drill', '场景演练'], ['random', '随机抽句']].forEach(function (t) {
       var b = h('button', t[0] === cur ? 'on' : null, t[1]);
       b.dataset.dc = t[0];
       b.onclick = function () {
@@ -44,6 +44,7 @@
     function render() {
       body.innerHTML = '';
       if (cur === 'browse') renderBrowse();
+      else if (cur === 'dialog') renderDialogs();
       else if (cur === 'drill') renderDrill();
       else renderRandom();
     }
@@ -120,13 +121,93 @@
       }
     }
 
+    /* ---------- 跟读评测（单条表达） ----------
+       复用 ui.canRecognize / ui.scoreSpeech，与场景视图同一套评分口径。
+       这里刻意只做「单句跟读」而不是整段——日常表达本来就是一句一句
+       往外蹦的，单句反馈比整段更可执行。*/
+    function attachShadow(row, target) {
+      if (!ui.canRecognize()) return null;
+      var btn = h('button', 'mini-btn rec', '🎤');
+      btn.title = '跟读评测';
+      btn.style.flexShrink = '0';
+      var fb = h('div', 'feedback score-fb');
+      fb.style.cssText = 'display:none;margin-top:6px';
+      row.appendChild(fb);
+
+      var rec = null, t0 = 0, got = '';
+      btn.onclick = function () {
+        if (btn.classList.contains('on')) {
+          if (rec) { try { rec.stop(); } catch (e) { } }
+          return;
+        }
+        var R = global.SpeechRecognition || global.webkitSpeechRecognition;
+        rec = new R();
+        rec.lang = 'en-US';
+        rec.interimResults = true;
+        rec.maxAlternatives = 3;
+        rec.continuous = false;
+        btn.classList.add('on');
+        btn.textContent = '⏹';
+        t0 = Date.now(); got = '';
+        fb.style.display = 'block';
+        fb.className = 'feedback info score-fb';
+        fb.innerHTML = '<span style="font-size:12.5px">🎙 正在听…请朗读这句</span>';
+        rec.onresult = function (e) {
+          got = '';
+          for (var i = e.resultIndex; i < e.results.length; i++) got += e.results[i][0].transcript;
+          if (got) fb.innerHTML = '<span style="font-size:12.5px">识别中：' + got + '</span>';
+        };
+        rec.onerror = function (e) {
+          reset();
+          ui.toast('识别失败：' + (e.error === 'not-allowed' ? '请允许麦克风权限' : e.error));
+        };
+        rec.onend = function () {
+          reset();
+          var dur = (Date.now() - t0) / 1000;
+          if (!got) { fb.className = 'feedback no score-fb'; fb.innerHTML = '没有识别到声音，请重试。'; return; }
+          var best = null;
+          try {
+            for (var k = 0; k < rec.results.length; k++) {
+              var r = rec.results[k];
+              for (var a = 0; a < r.length; a++) {
+                var sc = ui.scoreSpeech(target, r[a].transcript, r[a].confidence || .7, dur);
+                if (sc.score > (best ? best.score : 0)) best = sc;
+              }
+            }
+          } catch (e) { }
+          if (!best) { fb.className = 'feedback no score-fb'; fb.innerHTML = '识别失败，请重试。'; return; }
+          showShadowScore(fb, target, best);
+        };
+        try { rec.start(); } catch (e) { reset(); ui.toast('无法启动录音'); }
+      };
+      function reset() {
+        btn.classList.remove('on');
+        btn.textContent = '🎤';
+      }
+      row._shadowBtn = btn;
+      row._shadowFb = fb;
+      return btn;
+    }
+
+    function showShadowScore(fb, target, res) {
+      var tone = res.score >= 85 ? '很接近了' : res.score >= 70 ? '不错' : '再来一次';
+      fb.className = 'feedback ' + (res.score >= 80 ? 'ok' : res.score >= 60 ? 'info' : 'no') + ' score-fb';
+      fb.innerHTML = '<b>' + res.score + ' 分</b> · ' + tone +
+        ' — 词准确率 <b>' + res.wordAcc + '%</b> · 语速 <b>' + res.wpm + ' WPM</b>' +
+        (res.missed.length ? '<br>未识别到：<b style="color:#a83238">' + res.missed.join(' / ') + '</b>' : '<br>全部单词都已识别 ✓') +
+        (res.extra.length ? '<br>多识别到：<span style="opacity:.75">' + res.extra.join(' / ') + '</span>' : '') +
+        '<br><span style="opacity:.8;font-size:11.5px">评分 = 词准确率×60% + 语速得分×15% + 识别置信度×25%。识别受噪音与口音影响，当参考而非判决。</span>';
+      if (global.Progress) global.Progress.recordAnswer(res.score >= 70);
+    }
+
     function rowEl(r) {
-      var row = h('div');
+      var row = h('div', 'dc-row');
       row.style.cssText = 'padding:8px 0;border-bottom:1px solid var(--surface-2)';
       var top = h('div');
       top.style.cssText = 'display:flex;align-items:center;gap:8px;flex-wrap:wrap';
       var sp = h('button', 'mini-btn', '🔊');
       sp.style.flexShrink = '0';
+      sp.title = '朗读';
       sp.onclick = function () { ui.tts.speak(r.en); };
       top.appendChild(sp);
       var en = h('span', null, r.en);
@@ -137,11 +218,284 @@
       var tag = h('span', 'tag', r.r);
       tag.style.cssText = 'background:' + RCOLOR[r.r] + '18;color:' + RCOLOR[r.r];
       top.appendChild(tag);
+      var shadowBtn = attachShadow(row, r.en);
+      if (shadowBtn) top.appendChild(shadowBtn);
       row.appendChild(top);
       var cn = h('div', null, r.cn);
       cn.style.cssText = 'font-size:13px;color:var(--text-2);margin-top:1px';
       row.appendChild(cn);
+
+      // 深层搭配/辨析（若词库里有）
+      var deep = global.VocabDeepAny ? global.VocabDeepAny.get(r.en) : null;
+      if (deep && deep.coll && deep.coll.length) {
+        var cb = h('div', 'dc-coll');
+        cb.style.cssText = 'font-size:12px;color:var(--text-2);margin-top:4px;padding:6px 9px;background:var(--surface-2);border-radius:7px;line-height:1.6';
+        cb.innerHTML = '<b style="color:var(--text-3)">固定搭配</b> ' + esc(deep.coll[0]) +
+          (deep.coll[1] ? ' <span style="opacity:.8">— ' + esc(deep.coll[1]) + '</span>' : '');
+        row.appendChild(cb);
+      }
+      // 这条表达出现在哪段对话里 → 可点击跳转。
+      // 与上面的 deep 判断无关：日常表达多是整句，词库里查不到，
+      // 但对话层用 key 收录了它们，两套数据源要各走各的。
+      var dlgHit = global.CommDialogs ? global.CommDialogs.findByExpression(r.en) : [];
+      if (dlgHit.length) {
+        var jb = h('button', 'mini-btn ghost', '💬 在对话中');
+        jb.style.cssText = 'margin-top:5px;font-size:11.5px';
+        jb.title = dlgHit[0].titleCn || dlgHit[0].title;
+        jb.onclick = function () { openDialog(dlgHit[0].id); };
+        row.appendChild(jb);
+      }
       return row;
+    }
+    function esc(s) {
+      return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) {
+        return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c];
+      });
+    }
+
+    /* ---------- 对话示例 ----------
+       把孤立的表达放回真实轮替里：谁在说、什么场合、整段怎么走。*/
+    var dlgOpen = null;
+    function openDialog(id) {
+      var d = global.CommDialogs ? global.CommDialogs.byId(id) : null;
+      if (!d) return;
+      cur = 'dialog';
+      ui.$$('#dcTabs button').forEach(function (x) { x.classList.remove('on'); });
+      var btn = ui.$('#dcTabs button[data-dc="dialog"]');
+      if (btn) btn.classList.add('on');
+      renderDialogs(d.id);
+      setTimeout(function () {
+        var el = ui.$('#dlg_' + d.id);
+        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }, 60);
+    }
+
+    function renderDialogs(focusId) {
+      var CD = global.CommDialogs;
+      if (!CD) return;
+      var list = CD.all();
+
+      // 顶部说明
+      var intro = h('div', 'card');
+      intro.style.cssText = 'background:linear-gradient(140deg,#f2f9ff,#fff 60%)';
+      var ih = h('div', 'card-head');
+      ih.appendChild(h('h3', null, '为什么孤立背表达不够用？'));
+      intro.appendChild(ih);
+      var ip = h('div');
+      ip.style.cssText = 'font-size:13.5px;line-height:1.85;color:var(--text-2)';
+      ip.innerHTML = '左边 ' + all.length + ' 条表达是「话轮」——真实对话的最小单位。' +
+        '但话轮必须<b>成串</b>才有用：对方说完 A，你需要 1 秒内调出 B。' +
+        '这个能力只能靠「看完整对话 + 听完整对话」建立。<br>' +
+        '下面 ' + list.length + ' 段对话把高频表达放回真实语境，' +
+        '每段都标注了<b>使用场景</b>与<b>语域提醒</b>——' +
+        '同一句中文，在 R1 邮件和 R3 朋友聊天里要用不同的英文。';
+      intro.appendChild(ip);
+      body.appendChild(intro);
+
+      list.forEach(function (d) {
+        body.appendChild(dialogCard(d, focusId === d.id));
+      });
+    }
+
+    function dialogCard(d, focus) {
+      var card = h('div', 'card');
+      card.id = 'dlg_' + d.id;
+      if (focus) {
+        card.style.borderColor = 'var(--primary)';
+        card.style.boxShadow = '0 0 0 3px var(--primary-soft)';
+      }
+      var hd = h('div', 'card-head');
+      var left = h('div');
+      var meta = h('div', 'sub');
+      meta.style.cssText = 'display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:2px';
+      var catTag = h('span', 'tag', d.cat);
+      catTag.style.cssText = 'background:#eef2ff;color:#4f7cff';
+      meta.appendChild(catTag);
+      var rTag = h('span', 'tag', d.r);
+      rTag.style.cssText = 'background:' + (RCOLOR[d.r] || '#888') + '18;color:' + (RCOLOR[d.r] || '#888');
+      meta.appendChild(rTag);
+      meta.appendChild(h('span', 'sub', (d.lines || []).length + ' 句 · ' + d.id));
+      left.appendChild(h('h3', null, d.titleCn));
+      left.appendChild(h('div', 'sub', d.title));
+      left.appendChild(meta);
+      hd.appendChild(left);
+      card.appendChild(hd);
+
+      // 使用场景
+      if (d.scene) {
+        var sc = h('div', 'dc-scene');
+        sc.innerHTML = '<b>什么时候用</b>：' + esc(d.scene);
+        card.appendChild(sc);
+      }
+
+      // 对话正文
+      var box = h('div', 'dc-dialog');
+      var cnOn = true;
+      var stats = { n: 0, sum: 0 };
+      // 统计条先建好，逐句跟读回调要用它的 refresh
+      var st2 = h('div', 'sub');
+      st2.style.cssText = 'margin-top:6px;font-size:11.5px;color:var(--text-3)';
+      var refreshStats = function () {
+        st2.textContent = stats.n ? '本段跟读 ' + stats.n + ' 次 · 平均 ' + Math.round(stats.sum / stats.n) + ' 分' : '';
+      };
+
+      (d.lines || []).forEach(function (ln, i) {
+        var row = h('div', 'dc-turn ' + (ln.who === 'A' ? 'is-a' : 'is-b'));
+        var who = h('div', 'dc-who', ln.who);
+        var col = h('div', 'dc-col');
+
+        var enWrap = h('div', 'dc-en');
+        var sp = h('button', 'mini-btn', '🔊');
+        sp.style.flexShrink = '0';
+        sp.title = '朗读这句';
+        sp.onclick = function () { ui.tts.speak(ln.en); };
+        enWrap.appendChild(sp);
+        var enT = h('span', null, ln.en);
+        enT.style.cssText = 'font-size:14.5px;flex:1;cursor:pointer;line-height:1.55';
+        enT.title = '点击朗读';
+        enT.onclick = function () { ui.tts.speak(ln.en); };
+        enWrap.appendChild(enT);
+        col.appendChild(enWrap);
+
+        var cnT = h('div', 'dc-cn', ln.cn);
+        col.appendChild(cnT);
+
+        // 重点表达：标注 + 搭配 + 划词取词
+        if (ln.key) {
+          var kb = h('div', 'dc-key');
+          var kTag = h('button', 'mini-btn ghost', '⭐ ' + ln.key);
+          kTag.style.fontSize = '11.5px';
+          kTag.title = '查看这个表达的讲解';
+          kTag.onclick = function (e) {
+            e.stopPropagation();
+            if (global.Lookup) global.Lookup.show(ln.key);
+          };
+          kb.appendChild(kTag);
+          var deep = global.VocabDeepAny ? global.VocabDeepAny.get(ln.key) : null;
+          if (deep && deep.coll && deep.coll.length) {
+            var cnote = h('span', 'dc-keynote');
+            cnote.textContent = '固定搭配：' + deep.coll[0] + (deep.coll[1] ? '（' + deep.coll[1] + '）' : '');
+            kb.appendChild(cnote);
+          }
+          col.appendChild(kb);
+        }
+
+        // 跟读评测
+        var fbHost = h('div');
+        col.appendChild(fbHost);
+        attachShadowTurn(col, ln.en, fbHost, stats, refreshStats);
+
+        row.appendChild(who);
+        row.appendChild(col);
+        box.appendChild(row);
+      });
+      card.appendChild(box);
+
+      // 语域提醒
+      if (d.note) {
+        var nt = h('div', 'dc-note');
+        nt.innerHTML = '<b>语域提醒</b>：' + esc(d.note);
+        card.appendChild(nt);
+      }
+
+      // 操作行
+      var act = h('div', 'btn-row');
+      act.style.marginTop = '13px';
+      var playAll = h('button', 'btn soft', '▶ 连续朗读全段');
+      playAll.onclick = function () {
+        if (!ui.tts.speakSequence) { ui.toast('朗读队列不可用'); return; }
+        ui.tts.speakSequence((d.lines || []).map(function (l) { return { text: l.en }; }), {
+          onprogress: function (i) {
+            var rows = ui.$$('.dc-turn', box);
+            rows.forEach(function (x) { x.style.background = ''; });
+            if (rows[i]) rows[i].style.background = 'var(--primary-soft)';
+          },
+          onend: function () {
+            ui.$$('.dc-turn', box).forEach(function (x) { x.style.background = ''; });
+          }
+        });
+      };
+      act.appendChild(playAll);
+
+      var tg = h('button', 'btn ghost', '隐藏中文');
+      tg.onclick = function () {
+        cnOn = !cnOn;
+        ui.$$('.dc-cn', box).forEach(function (x) { x.style.display = cnOn ? '' : 'none'; });
+        tg.textContent = cnOn ? '隐藏中文' : '显示中文';
+      };
+      act.appendChild(tg);
+
+      var st = h('span', 'sub');
+      st.style.cssText = 'margin-left:auto;align-self:center;font-size:12px';
+      card.appendChild(act);
+      card.appendChild(st2);
+      refreshStats();
+
+      return card;
+    }
+
+    /* 对话里单句的跟读评测（与分类浏览共用 attachShadow 的评分口径） */
+    function attachShadowTurn(col, target, fbHost, stats, refresh) {
+      if (!ui.canRecognize()) return;
+      var btn = h('button', 'mini-btn rec', '🎤 跟读');
+      btn.style.marginTop = '6px';
+      fbHost.appendChild(btn);
+      var rec = null, t0 = 0, got = '';
+      function reset() { btn.classList.remove('on'); btn.textContent = '🎤 跟读'; }
+      btn.onclick = function () {
+        if (btn.classList.contains('on')) {
+          if (rec) { try { rec.stop(); } catch (e) { } }
+          return;
+        }
+        var R = global.SpeechRecognition || global.webkitSpeechRecognition;
+        rec = new R();
+        rec.lang = 'en-US';
+        rec.interimResults = true;
+        rec.maxAlternatives = 3;
+        rec.continuous = false;
+        btn.classList.add('on');
+        btn.textContent = '⏹ 停止';
+        t0 = Date.now(); got = '';
+        fbHost.innerHTML = '';
+        fbHost.appendChild(btn);
+        var tip = h('div', 'feedback info');
+        tip.style.cssText = 'margin-top:6px';
+        tip.innerHTML = '<span style="font-size:12.5px">🎙 正在听…请朗读这句</span>';
+        fbHost.appendChild(tip);
+        rec.onresult = function (e) {
+          got = '';
+          for (var i = e.resultIndex; i < e.results.length; i++) got += e.results[i][0].transcript;
+          if (got) tip.innerHTML = '<span style="font-size:12.5px">识别中：' + got + '</span>';
+        };
+        rec.onerror = function (e) {
+          reset();
+          ui.toast('识别失败：' + (e.error === 'not-allowed' ? '请允许麦克风权限' : e.error));
+        };
+        rec.onend = function () {
+          reset();
+          var dur = (Date.now() - t0) / 1000;
+          var fb = h('div', 'feedback');
+          fb.style.marginTop = '6px';
+          fbHost.innerHTML = '';
+          fbHost.appendChild(btn);
+          fbHost.appendChild(fb);
+          if (!got) { fb.className = 'feedback no'; fb.innerHTML = '没有识别到声音，请重试。'; return; }
+          var best = null;
+          try {
+            for (var k = 0; k < rec.results.length; k++) {
+              var r = rec.results[k];
+              for (var a = 0; a < r.length; a++) {
+                var sc = ui.scoreSpeech(target, r[a].transcript, r[a].confidence || .7, dur);
+                if (sc.score > (best ? best.score : 0)) best = sc;
+              }
+            }
+          } catch (e) { }
+          if (!best) { fb.className = 'feedback no'; fb.innerHTML = '识别失败，请重试。'; return; }
+          showShadowScore(fb, target, best);
+          if (stats) { stats.n++; stats.sum += best.score; if (refresh) refresh(); }
+        };
+        try { rec.start(); } catch (e) { reset(); ui.toast('无法启动录音'); }
+      };
     }
 
     /* ---------- 场景演练 ---------- */

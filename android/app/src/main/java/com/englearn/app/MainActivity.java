@@ -31,10 +31,16 @@ public class MainActivity extends AppCompatActivity {
 
     private WebView web;
     private long lastBackAt = 0L;
+    private NativeTTS nativeTTS;
 
     /** WebView 内承载网页的虚拟域名 */
     private static final String APP_ORIGIN = "https://appassets.androidplatform.net";
     private static final String START_URL = APP_ORIGIN + "/assets/web/index.html";
+
+    /** 供 NativeTTS 回调网页时拿到 WebView */
+    public WebView getWebView() {
+        return web;
+    }
 
     @SuppressLint("SetJavaScriptEnabled")
     @Override
@@ -58,9 +64,12 @@ public class MainActivity extends AppCompatActivity {
         s.setMediaPlaybackRequiresUserGesture(false); // 允许发音自动播放
         s.setCacheMode(WebSettings.LOAD_DEFAULT);
 
-        // 混合内容：云服务是 https，无需放宽；这里保持严格模式
+        // 混合内容：云服务与在线发音代理都可能是 https，默认保持严格模式。
+        // 但保留 COMPATIBILITY_MODE 作为兜底——网站以 https 提供时，
+        // 严格模式会把指向 http 代理的音频请求直接掐掉，表现为「发音按钮无反应」，
+        // 而这种失败没有任何报错，只能靠放宽这一档来避免。
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-            s.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
+            s.setMixedContentMode(WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE);
         }
 
         // 让网页里的语音合成走系统 TTS
@@ -123,17 +132,27 @@ public class MainActivity extends AppCompatActivity {
 
     /**
      * 网页加载前设置全局标识。
-     * 网页侧读取 window.__NATIVE_APP__ 来判断是否运行在 App 外壳内。
+     *
+     * 注入两样东西：
+     *   AndroidBridge —— 用于识别「运行在原生外壳内」
+     *   AndroidTTS   —— 原生 TextToSpeech 桥接。
+     *     必须注入，因为 Android WebView 不实现 Web Speech API，
+     *     speechSynthesis 对象存在但 getVoices() 恒空、speak() 静默失败。
      */
     private void injectNativeFlag() {
         web.getSettings().setUserAgentString(
                 web.getSettings().getUserAgentString() + " EngLearnAndroid/1.0");
+
         web.addJavascriptInterface(new Object() {
             @android.webkit.JavascriptInterface
             public String getPlatform() {
                 return "android";
             }
         }, "AndroidBridge");
+
+        nativeTTS = new NativeTTS(this);
+        web.addJavascriptInterface(nativeTTS, "AndroidTTS");
+        nativeTTS.init();
     }
 
     @Override
@@ -144,6 +163,9 @@ public class MainActivity extends AppCompatActivity {
 
     @Override
     protected void onDestroy() {
+        if (nativeTTS != null) {
+            nativeTTS.destroy();
+        }
         if (web != null) {
             web.destroy();
         }

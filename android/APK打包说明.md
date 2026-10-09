@@ -1,9 +1,12 @@
-# 英语学习系统 · Android APK 打包说明
+# Lumen · Android APK 打包说明
 
 ## 这是什么
 
 把整个英语学习系统打包成一个可安装的 Android 应用（`.apk`）。
-装到手机后有独立图标，点开即用，**完全离线可用**（5449 词库、全部内容随包分发）。
+装到手机后有独立图标，点开即用，**完全离线可用**（全部词库与学习内容随包分发）。
+
+App 内的发音走**系统原生 TTS 引擎**，不是网页接口——Android WebView 根本不实现 Web Speech API，
+网页里看到的语音数恒为 0，这是正常现象。详见 `docs/双端语言功能设计说明.md`。
 
 ## 一键打包
 
@@ -57,8 +60,18 @@ APK 采用**本地优先**设计：
 | 资源加载 | `WebViewAssetLoader` | 以 `https://appassets.androidplatform.net/` 加载，而非 `file://`。这样 localStorage、Service Worker、fetch 都能正常工作，Origin 稳定 |
 | Service Worker | 包内已移除 | 资源随包分发，不需要缓存层。留着反而会缓存旧版本导致更新不及时 |
 | 权限 | 仅联网 | 不申请存储与麦克风。学习数据只存应用私有目录 |
-| 签名 | 调试签名 | 保证 APK 能直接安装。**上架应用商店需换成正式签名** |
-| 体积 | 约 12–18 MB | 主要来自 5449 词库与全部学习内容 |
+| 网络安全 | `network_security_config.xml` | 默认禁止明文 HTTP；**仅对 `127.0.0.1`/`localhost`/`10.0.2.2` 放开**，供本地发音代理访问。其余域名（含云同步）仍强制加密 |
+| 混合内容 | `MIXED_CONTENT_COMPATIBILITY_MODE` | 严格模式会掐掉 https 页面加载 http 代理音频，表现为「点发音完全没反应且不报错」 |
+| 签名 | 调试签名 | 保证 APK 能直接安装，且能覆盖安装升级。**上架应用商店需换成正式签名** |
+| 体积 | 约 5 MB | 网页资源压缩后 2.8 MB |
+
+## 构建脚本的强制校验
+
+`build-apk.sh` 不会盲目打包，缺件时直接终止：
+
+- `assets/js/tts.js`、`assets/js/view-tts.js` 未同步 → 终止（否则 App 里是旧的发音代码）
+- `NativeTTS.java` 未同步 → 终止（否则 App 内无法发音）
+- 每次构建前清空 `assets/web` 与 `app/build`，避免残留上版本资源
 
 ## 常见问题
 
@@ -69,7 +82,17 @@ A：多半是资源没同步。重新执行一次 `build-apk.sh`，确认 `andro
 A：APK 内已移除 Service Worker，正常情况下安装新版即生效。若仍显示旧内容，先卸载旧版再装。
 
 **Q：发音没声音？**
-A：APK 调用系统 TTS（和浏览器发音是同一套）。需在手机「设置 → 系统 → 语言和输入法 → 文字转语音」中安装英语语音包。
+A：App 走系统 TTS。需在手机「设置 → 系统 → 语言和输入法 → 文字转语音输出」中安装英语语音包。
+若已装仍无声，进 App 内「发音设置」页查看状态卡——它会明确区分「原生引擎未就绪」与「系统缺英语语音包」。
+
+**Q：想验证包内资源对不对？**
+```bash
+node "E:/ai/英语学习网站/test/verify-apk-content.js"   # 32 项：发音桥接、词库、WebView 配置
+```
+
+**Q：项目路径含中文会不会构建失败？**
+A：会。Gradle 在 Windows 下遇到中文路径会报「文件名、目录名或卷标语法不正确」。
+脚本的解法是把工程同步到纯英文临时目录 `E:/ai/_apkbuild` 再构建，产物再拷回来。
 
 **Q：想要应用商店版本？**
 A：需要改成正式签名（`keytool -genkeypair` 生成自己的密钥并妥善保管），并把 targetSdk、隐私政策等按商店要求补齐。当前版本仅供自行安装使用。
@@ -82,11 +105,16 @@ android/
 ├── gradle.properties         构建参数
 ├── local.properties          SDK 路径（自动生成，勿提交）
 ├── build-apk.sh              一键打包脚本
+├── APK打包说明.md             本文件
 └── app/
     ├── build.gradle          模块构建脚本
     └── src/main/
         ├── AndroidManifest.xml
-        ├── java/com/englearn/app/MainActivity.java   原生外壳
-        ├── res/               图标与主题
-        └── assets/web/        网页资源（构建时自动同步）
+        ├── java/com/englearn/app/
+        │   ├── MainActivity.java     原生外壳（WebView 配置 + 原生桥接注册）
+        │   └── NativeTTS.java        系统 TTS 引擎封装（App 内发声的唯一通路）
+        ├── res/
+        │   ├── values/strings.xml    应用名（Lumen）
+        │   └── xml/network_security_config.xml   网络明文白名单
+        └── assets/web/        网页资源（构建时自动同步，不入库）
 ```

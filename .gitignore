@@ -1,6 +1,5 @@
 # 依赖与构建产物
 node_modules/
-package.json
 package-lock.json
 
 # 临时文件
@@ -11,6 +10,10 @@ Thumbs.db
 # 本地数据备份（不应进仓库）
 *.json.bak
 _backup/
+
+# ---- 在线发音服务 ----
+# 音频缓存是运行时产物，可能几十上百 MB，且可随时重建
+tools/.tts-cache/
 
 # ---- Android 构建相关 ----
 # Gradle / Android SDK 路径与构建缓存
@@ -28,3 +31,5 @@ android/app/src/main/assets/web/
 # 构建产物
 android/app-release.apk
 android/app-release.aab
+# 旧版本残留的安装包（4.9M，不该进仓库）
+android/*.apk

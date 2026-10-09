@@ -1,6 +1,6 @@
 {
-  "name": "英语学习系统 · 从零基础到精通",
-  "short_name": "英语学习",
+  "name": "Lumen · 从零基础到精通",
+  "short_name": "Lumen",
   "description": "面向零基础成年人的英语学习应用：分级词库、场景口语、分级阅读，从零基础到精通的完整闭环。",
   "id": "/english-learning-system/",
   "start_url": "./index.html",
@@ -8,7 +8,7 @@
   "display": "standalone",
   "display_override": ["standalone", "minimal-ui"],
   "orientation": "portrait-primary",
-  "background_color": "#f6f8fc",
+  "background_color": "#f7f8fa",
   "theme_color": "#4f7cff",
   "lang": "zh-CN",
   "dir": "ltr",

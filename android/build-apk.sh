@@ -33,20 +33,31 @@ echo "   SDK:OK"
 echo "   JDK:     OK"
 
 echo "== 2/5 同步工程到英文临时目录 =="
-rm -rf "$BUILD_DIR"
+# 注意：不要 rm -rf 整个临时目录。
+# 目录里累积了 Gradle 缓存与依赖，删掉会导致每次重新下载（首次要 5 分钟）。
+# 改为「就地覆盖」：直接复制文件，旧的多余文件由 Gradle 自行处理。
 mkdir -p "$BUILD_DIR"
 
-# 复制 Gradle 工程文件与源码（排除构建产物与签名）
-for item in settings.gradle build.gradle gradle.properties app; do
-  if [ -e "$HERE/$item" ]; then
-    cp -r "$HERE/$item" "$BUILD_DIR/"
+# 复制 Gradle 工程文件与源码
+for item in settings.gradle build.gradle gradle.properties; do
+  if [ -f "$HERE/$item" ]; then
+    cp -f "$HERE/$item" "$BUILD_DIR/"
   fi
 done
-rm -rf "$BUILD_DIR/app/build"
+# app 目录用 rsync 语义：覆盖同名文件但不删除目录本身
+cp -r "$HERE/app" "$BUILD_DIR/"
+# 清掉上一次的构建产物（这是 Gradle 自己生成的，可安全重建）
+if [ -d "$BUILD_DIR/app/build" ]; then
+  find "$BUILD_DIR/app/build" -mindepth 1 -delete 2>/dev/null || true
+fi
 
 # 同步网页资源到 assets
 WEB_DEST="$BUILD_DIR/app/src/main/assets/web"
 mkdir -p "$WEB_DEST"
+# 先清掉旧的 web 资源，保证不会残留上版本的 js
+if [ -d "$WEB_DEST" ]; then
+  find "$WEB_DEST" -mindepth 1 -delete 2>/dev/null || true
+fi
 for item in index.html manifest.webmanifest assets; do
   if [ -e "$PROJ/$item" ]; then
     cp -r "$PROJ/$item" "$WEB_DEST/"
@@ -56,21 +67,52 @@ done
 # 留着反而会缓存旧版本资源导致更新不及时
 rm -f "$WEB_DEST/sw.js"
 
+# 校验：发音修复必须打进包里，否则 App 里还是旧的坏版本
+for must in assets/js/tts.js assets/js/view-tts.js; do
+  if [ ! -f "$WEB_DEST/$must" ]; then
+    echo "   错误：$must 没有同步进 assets，终止构建"; exit 1
+  fi
+done
+echo "   已同步发音模块：tts.js / view-tts.js"
+
+# 原生 TTS 桥接是 App 内发声的唯一通路，必须同步成功
+if [ ! -f "$BUILD_DIR/app/src/main/java/com/englearn/app/NativeTTS.java" ]; then
+  echo "   错误：NativeTTS.java 未同步，App 内将无法发音，终止构建"; exit 1
+fi
+echo "   已同步原生语音桥接：NativeTTS.java"
+
 echo "sdk.dir=$(cygpath -m "$SDK")" > "$BUILD_DIR/local.properties"
 echo "   资源大小：$(du -sh "$WEB_DEST" | cut -f1)"
 
-echo "== 3/5 生成签名 =="
+echo "== 3/5 准备签名 =="
 KEYSTORE="$BUILD_DIR/debug.keystore"
-keytool -genkeypair -v -keystore "$KEYSTORE" \
-  -storepass android -keypass android -alias androiddebugkey \
-  -keyalg RSA -keysize 2048 -validity 10000 \
-  -dname "CN=English Learn Debug, OU=Dev, O=EngLearn, L=NA, ST=NA, C=CN" >/dev/null 2>&1
-echo "   OK"
+# keytool 必须用 JDK 的完整路径：系统 PATH 里没有 keytool，
+# 直接调 keytool 会静默失败并让 set -e 提前退出脚本。
+KEYTOOL="$JAVA_HOME_DIR/bin/keytool.exe"
+if [ ! -f "$KEYTOOL" ]; then
+  echo "   错误：找不到 keytool（$KEYTOOL）"; exit 1
+fi
+# 已有签名就复用，保证能覆盖安装升级（签名变了装不上）
+if [ -f "$KEYSTORE" ]; then
+  echo "   复用已有调试签名"
+else
+  "$KEYTOOL" -genkeypair -v -keystore "$KEYSTORE" \
+    -storepass android -keypass android -alias androiddebugkey \
+    -keyalg RSA -keysize 2048 -validity 10000 \
+    -dname "CN=English Learn Debug, OU=Dev, O=EngLearn, L=NA, ST=NA, C=CN" \
+    > "$BUILD_DIR/keytool.log" 2>&1 || {
+      echo "   错误：生成签名失败，日志见 $BUILD_DIR/keytool.log"; exit 1; }
+  echo "   已生成调试签名"
+fi
 
 echo "== 4/5 构建（首次需下载依赖，约 2-5 分钟）==="
 cd "$BUILD_DIR"
 JAVA_HOME="$JAVA_HOME_DIR" "$GRADLE_BIN" assembleRelease \
   --no-daemon --console=plain 2>&1 | tail -25
+GRADLE_RC=${PIPESTATUS[0]}
+if [ "$GRADLE_RC" != "0" ]; then
+  echo "   Gradle 构建失败（退出码 $GRADLE_RC）"; exit 1
+fi
 
 echo "== 5/5 收集产物 =="
 BUILT_APK="$BUILD_DIR/app/build/outputs/apk/release/app-release.apk"
