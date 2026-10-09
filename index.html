@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="description" content="面向零基础成年人的英语学习网站：分级词库、场景口语、分级阅读，从零基础到精通的完整闭环。">
+<meta name="theme-color" content="#4f7cff">
+<title>英语学习系统 · 从零基础到精通</title>
+<link rel="stylesheet" href="assets/css/style.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%234f7cff'/><text y='72' x='50' text-anchor='middle' font-size='58' font-weight='bold' fill='white' font-family='sans-serif'>E</text></svg>">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="topbar-inner">
+    <div class="brand">
+      <div class="brand-mark">E</div>
+      <span class="brand-text">英语学习系统</span>
+    </div>
+    <nav class="nav" id="nav"></nav>
+    <div class="top-right">
+      <div class="streak-chip zero" id="streakChip" title="连续打卡天数">🔥 0</div>
+    </div>
+  </div>
+</header>
+
+<main class="wrap" id="view"></main>
+
+<script src="assets/js/data/words.js"></script>
+<script src="assets/js/data/words-gaokao-meta.js"></script>
+<script src="assets/js/data/content-phonemes.js"></script>
+<script src="assets/js/data/content-vocab.js"></script>
+<script src="assets/js/data/content-vocab-expansion.js"></script>
+<script src="assets/js/data/content-reading.js"></script>
+<script src="assets/js/data/content-reading2.js"></script>
+<script src="assets/js/data/content-speaking.js"></script>
+<script src="assets/js/data/content-path.js"></script>
+<script src="assets/js/data/content-slang.js"></script>
+<script src="assets/js/data/content-daily-scene.js"></script>
+<script src="assets/js/data/content-scene-l4.js"></script>
+<script src="assets/js/data/content-scene-expansion.js"></script>
+<script src="assets/js/data/content-daily-comm.js"></script>
+<script src="assets/js/data/content-daily-comm2.js"></script>
+<script src="assets/js/data/content-daily-comm3.js"></script>
+<script src="assets/js/data/content-daily-comm4.js"></script>
+<script src="assets/js/data/content-daily-comm5.js"></script>
+<script src="assets/js/data/content-phoneme-detail.js"></script>
+<script src="assets/js/data/content-topic-words.js"></script>
+<script src="assets/js/data/content-liaison.js"></script>
+<script src="assets/js/data/content-liaison2.js"></script>
+<script src="assets/js/data/content-index.js"></script>
+<script src="assets/js/store.js"></script>
+<script src="assets/js/progress.js"></script>
+<script src="assets/js/ui.js"></script>
+<script src="assets/js/charts.js"></script>
+<script src="assets/js/app.js"></script>
+<script src="assets/js/view-vocab.js"></script>
+<script src="assets/js/view-speak.js"></script>
+<script src="assets/js/view-read.js"></script>
+<script src="assets/js/view-daily-comm.js"></script>
+<script src="assets/js/view-phoneme.js"></script>
+<script src="assets/js/view-english.js"></script>
+<script src="assets/js/view-progress.js"></script>
+<script src="assets/js/view-path.js"></script>
+<script src="assets/js/view-psych.js"></script>
+<script>
+  // 所有模块就绪后再启动
+  (function () {
+    if (window.App) window.App.init();
+    else document.addEventListener('DOMContentLoaded', function () { window.App.init(); });
+  })();
+</script>
+</body>
+</html>

@@ -1,0 +1,13 @@
+# 依赖与构建产物
+node_modules/
+package.json
+package-lock.json
+
+# 临时文件
+*.log
+.DS_Store
+Thumbs.db
+
+# 本地数据备份（不应进仓库）
+*.json.bak
+_backup/
