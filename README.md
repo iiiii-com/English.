@@ -28,6 +28,59 @@
 
 ---
 
+
+## 云服务（账号与跨设备同步）
+
+应用已开通 WorkBuddy 云服务，学习数据可备份到云端并在多设备间同步。
+
+### 线上地址
+
+**https://english-learning-system-36589.app.workbuddy.host/**
+
+### 数据表
+
+| 表 | 用途 | 关键列 |
+|---|---|---|
+| `learner_state` | 主状态：SM-2 词卡、每日统计、徽章、设置 | `payload JSONB`, `device_label`, `updated_at` |
+| `learner_progress` | 自动进度记忆：逐词掌握度、逐句发音、时间线、弱项| `payload JSONB`, `updated_at` |
+
+两张表均为 `owner_id TEXT DEFAULT auth.uid()` + RLS 行级安全，
+用户只能读写自己的数据（4 条策略/表：SELECT / INSERT / UPDATE / DELETE）。
+
+### 数据流
+
+```
+本机 localStorage（权威，写入即生效）
+     ↕ 自动同步（登录后启用，防抖 3s + 5 分钟兜底 + 联网恢复补传）
+云端 PostgreSQL（跨设备持久化）
+```
+
+冲突以 `updated_at` 时间戳为准：较新的一方覆盖较旧的一方。
+
+### 登录方式
+
+邮箱验证码（注册 / 登录）。**不登录也完全可用**——数据存本机，
+只是换设备不会自动同步。
+
+### 手动操作
+
+「账号同步」页提供：立即同步、导出本机 JSON、从 JSON 导入、删除云端数据、退出登录。
+
+### 文件结构
+
+| 文件 | 职责 |
+|---|---|
+| `assets/js/cloud.js` | SDK 初始化、认证、双向同步、自动同步调度 |
+| `assets/js/view-account.js` | 登录/注册界面、同步状态、数据管理 |
+
+SDK 以 CDN `<script>` 形式引入（项目为纯静态、无构建步骤）：
+
+```html
+<script src="https://cdn.jsdelivr.net/npm/@tencent-ai/workbuddy-cloud-sdk@dev/lib/index.global.js"></script>
+```
+
+---
+
 ## 二、目录结构
 
 ```

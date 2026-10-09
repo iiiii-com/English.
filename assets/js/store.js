@@ -214,6 +214,10 @@
     try {
       localStorage.setItem(KEY, payload);
       runtime.degraded = false;
+      // 已登录时安排一次云端同步（防抖由 Cloud 内部处理）
+      if (global.Cloud && global.Cloud.isSignedIn && global.Cloud.isSignedIn()) {
+        global.Cloud.scheduleSync();
+      }
     } catch (e) {
       // 配额溢出：裁剪历史数据后重试一次
       if (isQuotaError(e) && trimOldData()) {

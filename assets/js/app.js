@@ -797,7 +797,8 @@
     openSheet: openSheet, showSurprise: showSurprise, maybeSurprise: maybeSurprise,
     currentLevel: currentLevel, fmtDate: fmtDate, fmtDateFull: fmtDateFull,
     estimateAbilities: estimateAbilities, checkUnlock: checkUnlock,
-    pendingUnlockConditions: pendingUnlockConditions
+    pendingUnlockConditions: pendingUnlockConditions,
+    cloud: global.Cloud
   };
   /* 视图模块常直接用 $$ / $，此处挂到全局供其使用 */
   global.$ = $;
@@ -862,6 +863,7 @@
     { id: 'english', label: '英语资料', group: '学习' },
     { id: 'phoneme', label: '音标口型', group: '学习' },
     { id: 'progress', label: '学习记忆', group: '学习' },
+    { id: 'account', label: '账号同步', group: '学习' },
     { id: 'speak', label: '口语', group: '学习' },
     { id: 'dailycomm', label: '日常交流', group: '学习' },
     { id: 'read', label: '阅读', group: '学习' },
@@ -915,7 +917,14 @@
     var initId = location.hash.slice(1);
     if (initId && views[initId]) current = initId;
 
-    // 其他视图模块已通过 global.Views 自行注册
+    // 云服务：初始化并在已有会话时开启自动同步。
+    // SDK 未加载（离线或 CDN 不可达）时静默跳过，应用继续以本地模式运行。
+    if (global.Cloud) {
+      global.Cloud.init()
+        .then(function () { if (global.Cloud.isSignedIn()) global.Cloud.startAutoSync(); })
+        .catch(function (e) { console.warn('[app] 云服务初始化异常', e); });
+    }
+
     // 其他视图模块已通过 global.Views 自行注册
     render();
   }

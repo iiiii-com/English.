@@ -90,6 +90,10 @@
         compress();
         try { localStorage.setItem(KEY, JSON.stringify(data)); } catch (_) { /* 放弃 */ }
       }
+      // 已登录时安排一次云端同步（与 store 共用防抖队列）
+      if (global.Cloud && global.Cloud.isSignedIn && global.Cloud.isSignedIn()) {
+        global.Cloud.scheduleSync();
+      }
     }, 400);
   }
 
