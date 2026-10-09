@@ -1579,6 +1579,36 @@ a { color: var(--primary); text-decoration: none; }
 .brand-sig .bs-note { font-size: 12.5px; color: var(--text-3); line-height: 1.6; }
 .brand-sig .bs-note i { font-style: italic; color: var(--text-2); }
 
+/* ---------------- 发音不可用提示条 ----------------
+   用琥珀色而非红色：这不是报错，是一个需要用户动手解决的状态。
+   红色会让人以为出了故障、以为要重装点什么。 */
+.tts-banner {
+  display: flex; align-items: flex-start; gap: 10px;
+  margin: 0 0 18px; padding: 12px 14px;
+  border: 1px solid #f0d9a8;
+  background: #fdf8ec;
+  border-radius: 12px;
+}
+.tts-banner .tb-ico { font-size: 15px; line-height: 1.5; flex-shrink: 0; }
+.tts-banner .tb-body {
+  flex: 1; min-width: 0;
+  font-size: 13px; line-height: 1.75; color: var(--text-2);
+}
+.tts-banner .tb-body b { display: block; color: var(--text); margin-bottom: 2px; }
+.tts-banner .tb-body code {
+  font-size: 11.5px; padding: 1px 5px; border-radius: 4px;
+  background: rgba(0, 0, 0, .05); color: var(--text);
+}
+.tts-banner .tb-btn {
+  flex-shrink: 0; padding: 6px 12px; font-size: 12.5px; align-self: center;
+}
+
+@media (max-width: 760px) {
+  .tts-banner { flex-wrap: wrap; padding: 11px 12px; }
+  .tts-banner .tb-body { flex-basis: calc(100% - 30px); }
+  .tts-banner .tb-btn { margin-left: 30px; align-self: flex-start; }
+}
+
 @media (max-width: 760px) {
   .brand-sig { margin: -6px 0 15px; padding-left: 9px; gap: 7px; flex-wrap: nowrap; }
   .brand-sig .bs-word { font-size: 12.5px; flex-shrink: 0; }

@@ -223,6 +223,42 @@
     head.appendChild(sub);
     root.appendChild(head);
 
+    /* ---- 发音状态提示 ----
+       只在「本机没有英语语音」且「代理确实连不上」时出现。
+       两个条件都满足才是真的发不出声；只满足一条时（比如本机装了语音包）
+       提示就是噪音。
+       放在总览页是因为这是用户来的第一页，让他在这里就知道怎么解决，
+       而不是点十几次发音才发现没声音。 */
+    function renderTTSBanner() {
+      var old = root.querySelector('.tts-banner');
+      if (old) old.parentNode.removeChild(old);
+
+      if (!global.TTS) return;
+      // 本机有英语语音就不必打扰——它本身就是一条可用的路径
+      if (global.TTS.hasEnglishVoice && global.TTS.hasEnglishVoice()) return;
+      if (!global.TTS.proxyReachable || global.TTS.proxyReachable() !== false) return;
+
+      var warn = h('div', 'tts-banner');
+      warn.innerHTML = '<span class="tb-ico" aria-hidden="true">🔇</span>'
+        + '<span class="tb-body">'
+        + '<b>目前无法发音</b>'
+        + '在线发音服务没有运行，且这台设备没有英语语音包。'
+        + '双击项目里的 <code>tools/启动发音服务.bat</code> 即可，'
+        + '或在该目录下执行 <code>node tools/tts-server.js</code>。'
+        + '</span>';
+      var wa = h('button', 'btn soft tb-btn', '去设置');
+      wa.type = 'button';
+      wa.onclick = function () { location.hash = 'tttsettings'; };
+      warn.appendChild(wa);
+      // 插在标题之后、品牌注脚之前
+      var anchor = root.querySelector('.brand-sig');
+      if (anchor && anchor.parentNode) anchor.parentNode.insertBefore(warn, anchor);
+      else root.appendChild(warn);
+    }
+
+    // 探测是异步的，所以先渲染内容再补提示条，避免用户看到它"闪一下"
+    setTimeout(renderTTSBanner, 0);
+
     /* 品牌注脚：拉丁词源 + 同源词。
        放在这里而不是设置页，是因为词根模块本身就是站内内容——
        站名和词根互为呼应，是最省力的品牌表达。 */
@@ -985,30 +1021,28 @@
 
   /* 代理发音地址解析。
      优先级：
-       1. 用户在设置里手填的（localStorage.ttsProxy）
-       2. 同源部署 —— 正式上线后把 tts-server 挂在同域的 /tts 下即可，不用改代码
-       3. 本机开发端口 8788
-     Android App 走的是 file:// 或本地 asset，同源那条不成立，
-     会落到 127.0.0.1:8788 —— 前提是手机上也有代理在监听，
-     这在设置页有对应的开关和状态显示。 */
+       1. 用户手填的（localStorage.lumen.ttsProxy，填 'off' 可关闭）
+       2. 与页面同源的非本机地址 → 假设 /tts 是代理挂载点（正式部署走这条）
+       3. 其余一律 127.0.0.1:8788（本地开发、file:// 直接打开、App 内）
+
+     第3 条曾经给 App 内（file://）返回空串，想法是「手机上不会跑这个服务，
+     配上地址会白等超时」。但 file:// 不只出现在 App 内——
+     用户在电脑上双击 index.html 也是这个协议，于是「连不上」。
+     这是把两种场景混为一谈。
+     代价其实可控：App 内原生 TTS 优先级高于代理（见 tts.js resolveMode），
+     代理只在原生未就绪时才会被问到，此时再连不上也就是一次快速失败，
+     不影响 App 的正常使用。 */
   function resolveTTSProxy() {
     var custom = '';
     try { custom = String(localStorage.getItem('lumen.ttsProxy') || '').trim(); } catch (e) {}
     if (custom === 'off') return '';
     if (custom) return custom;
-    // 与页面同源且不是本地文件协议时，假设 /tts 是代理挂载点
     if (location.protocol === 'http:' || location.protocol === 'https:') {
       if (location.hostname !== '127.0.0.1' && location.hostname !== 'localhost') {
         return location.origin + '/tts';
       }
-      return 'http://127.0.0.1:8788';
     }
-    /* App 内（file:// 载入本地资源）：默认不配代理。
-       App 有原生 TTS 引擎，能读整句、零延迟、离线可用。
-       手机上通常不会跑着这个 Node 服务，若配上代理地址，
-       原生一旦未就绪就会先白等 8 秒超时才回落——反而更差。
-       真要用代理，可以在设置页手填地址（localStorage.lumen.ttsProxy）。*/
-    return '';
+    return 'http://127.0.0.1:8788';
   }
 
   function init() {
@@ -1021,6 +1055,17 @@
       // 顺序反了会导致首屏显示"无英语语音"的错误提示。
       try { global.TTS.setProxy(resolveTTSProxy()); } catch (e) {}
       global.TTS.init();
+      /* 主动探一次服务连通性。
+         「已配置」和「连得上」是两件事——地址写对了但服务没启动时，
+         页面看起来一切正常，点发音却毫无反应，必须先探清楚再决定要不要提示。*/
+      try {
+        if (global.TTS.probeProxy) {
+          global.TTS.probeProxy().then(function (ok) {
+            // 探测结果会影响总览页的提示条，此时首屏可能已渲染完
+            if (!ok && current === 'dash') render();
+          });
+        }
+      } catch (e) {}
     }
     if (global.PWA) global.PWA.init();
     buildNav();

@@ -252,6 +252,50 @@
     return proxyConfigured();
   }
 
+  /* ---- 连通性探测 ----
+     proxyAlive() 的语义是「已配置且未熔断」，不等于「连得上」。
+     未探测过时它会返回 true——于是总览页那条「无法发音」提示永远不会出现，
+     而实际上服务可能根本没启动。
+     所以这里单独维护一个真实的探测结果，供 UI 判断。 */
+  var proxyReachable = null;   // null=未探测  true=通  false=不通
+
+  function markProxyReachable(v) {
+    proxyReachable = v;
+    global.__ttsProxyReachable = v;
+  }
+
+  /** 主动探一次 /health。返回 Promise<boolean>，不抛错。 */
+  function probeProxy() {
+    if (!proxyConfigured()) return Promise.resolve(false);
+    var ctl = null;
+    var timer = null;
+    return new Promise(function (resolve) {
+      ctl = typeof AbortController !== 'undefined' ? new AbortController() : null;
+      // 服务没启动时连接会被拒，通常 1-2 秒内就有结果；
+      // 4 秒还没回来说明地址不对或被防火墙拦了。
+      timer = setTimeout(function () {
+        if (ctl) { try { ctl.abort(); } catch (e) { /* 忽略 */ } }
+        markProxyReachable(false);
+        resolve(false);
+      }, 4000);
+      fetch(PROXY_BASE + '/health', ctl ? { signal: ctl.signal } : undefined)
+        .then(function (r) { return r.json(); })
+        .then(function (j) {
+          clearTimeout(timer);
+          markProxyReachable(!!(j && j.ok));
+          resolve(!!(j && j.ok));
+        })
+        .catch(function () {
+          clearTimeout(timer);
+          markProxyReachable(false);
+          resolve(false);
+        });
+    });
+  }
+
+  /** 最近一次探测结果。null 表示还没探过。 */
+  function proxyReachableNow() { return proxyReachable; }
+
   function markProxyFail() {
     proxyUnavailable = true;
     global.__ttsProxyFailAt = Date.now();
@@ -307,6 +351,7 @@
       }
 
       a.onplaying = function () {
+        markProxyReachable(true);
         if (o && o.onstart) { try { o.onstart(a); } catch (e) { /* 忽略 */ } }
         startKeepAlive();
       };
@@ -318,6 +363,7 @@
       a.onerror = function () {
         stopKeepAlive();
         markProxyFail();
+        markProxyReachable(false);
         done(false);
         if (o && o.onerror) { try { o.onerror('proxy-error'); } catch (e) { /* 忽略 */ } }
       };
@@ -1018,12 +1064,14 @@
     },
     getProxy: function () { return PROXY_BASE; },
     proxyAlive: proxyAlive,
+    probeProxy: probeProxy,
+    proxyReachable: proxyReachableNow,
     proxyVoices: function () {
       if (!PROXY_BASE) return Promise.resolve([]);
       return fetch(PROXY_BASE + '/voices')
         .then(function (r) { return r.json(); })
-        .then(function (j) { return (j && j.voices) || []; })
-        .catch(function () { return []; });
+        .then(function (j) { markProxyReachable(true); return (j && j.voices) || []; })
+        .catch(function () { markProxyReachable(false); return []; });
     },
     /** 预热：提前合成，让浏览器侧缓存住音频，避免首次点击有合成延迟 */
     warmup: function (texts) {

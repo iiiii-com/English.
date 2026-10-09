@@ -533,6 +533,40 @@ function check(name, ok, detail) {
     burst.every(r => r.status === 200 && r.bytes > 200),
     burst.map(r => r.status + '/' + r.bytes).join(' '));
 
+  /* ---------- 打开方式的兼容性 ----------
+     真实 bug：resolveTTSProxy 曾对 file:// 返回空串（为 App 内防白等超时），
+     但 file:// 也意味着用户在电脑上双击 index.html，
+     结果代理地址为空 → 完全连不上。这是把两种场景混为一谈。 */
+  const opened = await page.evaluate(() => ({
+    base: window.TTS.getProxy(),
+    reachable: window.TTS.proxyReachable(),
+    // 注意：这两个 typeof 必须留在 evaluate 内部。
+    // 放到外面会跑在 Node 环境里，window 未定义。
+    hasProbe: typeof window.TTS.probeProxy === 'function',
+    hasReachable: typeof window.TTS.proxyReachable === 'function'
+  }));
+  check('http 打开时已探测到服务可达',
+    opened.reachable === true, 'reachable=' + opened.reachable);
+  check('连通性探测接口已导出',
+    opened.hasProbe && opened.hasReachable,
+    'probeProxy=' + opened.hasProbe + ' proxyReachable=' + opened.hasReachable);
+
+  // file:// 场景：必须仍配置代理地址，否则双击打开就完全用不了。
+  // 用项目真实路径，不从 BASE 反推——BASE 带端口，
+  // 简单 replace('http://','') 会得到 127.0.0.1:8792 这种非法 file URL。
+  const PROJ = require('path').resolve(__dirname, '..').replace(/\\/g, '/');
+  const p2 = await browser.newPage();
+  await p2.goto('file:///' + PROJ + '/index.html',
+    { waitUntil: 'domcontentloaded' });
+  await p2.waitForTimeout(3000);
+  const f = await p2.evaluate(() => ({
+    base: window.TTS.getProxy(),
+    reachable: window.TTS.proxyReachable()
+  }));
+  check('file:// 打开时也能连上服务',
+    !!f.base && f.reachable === true, f.base + ' → ' + f.reachable);
+  await p2.close();
+
   console.log('\n=== 8. 无 JS 异常 ===\n');
   check('无未捕获异常', errs.length === 0, errs.slice(0, 3).join(' | '));
 
