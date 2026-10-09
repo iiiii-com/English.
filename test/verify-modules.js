@@ -567,6 +567,63 @@ function check(name, ok, detail) {
     !!f.base && f.reachable === true, f.base + ' → ' + f.reachable);
   await p2.close();
 
+  /* ---------- 7c. 移动端可达性 ---------- */
+  console.log('\n=== 7c. 移动端可达性 ===\n');
+
+  // 关键点：Node 的 server.listen(PORT) 默认只绑 127.0.0.1，
+  // 手机即使和电脑同一 WiFi 也连不上。必须显式绑 0.0.0.0。
+  const SERVER = require('path').resolve(__dirname, '..', 'tools', 'tts-server.js');
+  const src = require('fs').readFileSync(SERVER, 'utf8');
+  check('服务端监听 0.0.0.0（否则手机连不上）',
+    /listen\(\s*PORT\s*,\s*['"]0\.0\.0\.0['"]/.test(src),
+    (src.match(/server\.listen\([^)]*\)/) || ['未找到 listen 调用'])[0]);
+  check('启动时打印局域网地址', /lanAddresses/.test(src) && /手机访问/.test(src));
+
+  // 实际拿一个非回环地址探测，证明监听确实生效
+  const os = require('os');
+  let lan = null;
+  for (const name of Object.keys(os.networkInterfaces())) {
+    for (const n of os.networkInterfaces()[name] || []) {
+      const v4 = n.family === 'IPv4' || n.family === 4;
+      if (v4 && n.address && !n.internal && !n.address.startsWith('169.254.')) {
+        lan = n.address; break;
+      }
+    }
+    if (lan) break;
+  }
+  let lanOk = false, lanDetail = '未检测到局域网地址，跳过';
+  if (lan) {
+    lanDetail = lan + ' 未监听或不可达';
+    try {
+      const r = await fetch('http://' + lan + ':8788/health', {
+        signal: AbortSignal.timeout(5000), cache: 'no-store'
+      });
+      const j = await r.json();
+      lanOk = r.status === 200 && !!(j && j.ok);
+      lanDetail = 'http://' + lan + ':8788 → ' + r.status;
+    } catch (e) { lanDetail = lan + ' → ' + (e.code || e.message); }
+  }
+  check('局域网地址可访问 /health', lanOk, lanDetail);
+
+  // 设置页必须给出可编辑的地址输入框，否则手机上没法改成局域网地址
+  const p3 = await browser.newPage();
+  await p3.setViewportSize({ width: 390, height: 844 });
+  await p3.goto(BASE + '#tttsettings', { waitUntil: 'domcontentloaded' });
+  await p3.waitForTimeout(1500);
+  const m = await p3.evaluate(() => {
+    const inp = document.querySelector('input[type=url]');
+    return {
+      hasInput: !!inp,
+      fontSize: inp ? parseFloat(getComputedStyle(inp).fontSize) : 0,
+      text: document.body.innerText
+    };
+  });
+  check('服务地址是可编辑输入框（手机上才能改）', m.hasInput);
+  // iOS 聚焦时字号 <16px 会强制放大整个页面
+  check('地址输入框字号 ≥16px（避免 iOS 聚焦缩放）', m.fontSize >= 16, m.fontSize + 'px');
+  check('已提示手机需用局域网地址', /127\.0\.0\.1.*手机|手机.*127\.0\.0\.1|WiFi/i.test(m.text));
+  await p3.close();
+
   console.log('\n=== 8. 无 JS 异常 ===\n');
   check('无未捕获异常', errs.length === 0, errs.slice(0, 3).join(' | '));
 

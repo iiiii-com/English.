@@ -9,6 +9,13 @@
   'use strict';
   var V = global.Views, T = global.TTS, ui = global.ui, h = ui.h, S = global.Store;
 
+  /* 把用户输入的地址安全地插进 innerHTML */
+  function esc(s) {
+    return String(s == null ? '' : s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+
   V.tttsettings = function (root) {
     var head = h('div', 'page-head');
     head.appendChild(h('h1', null, '发音设置'));
@@ -353,10 +360,60 @@
       + '单词和整句都能读，是最稳定的一条路径。';
     card.appendChild(intro);
 
-    var addr = h('div');
-    addr.style.cssText = 'font-size:12.5px;color:var(--text-3);margin-bottom:12px;word-break:break-all';
-    addr.textContent = '服务地址：' + base;
-    card.appendChild(addr);
+    /* --- 服务地址：必须可编辑 ---
+       手机上 127.0.0.1 指向手机自己，必须改成电脑的局域网地址才能连上。
+       这里给的是输入框而不是只读文本：用户没有别的办法知道该填什么，
+       而电脑上能跑通不代表手机上也能。 */
+    var addrWrap = h('div');
+    addrWrap.style.marginBottom = '12px';
+    var addrLab = h('div');
+    addrLab.style.cssText = 'font-size:12.5px;color:var(--text-3);margin-bottom:5px';
+    addrLab.textContent = '服务地址';
+    addrWrap.appendChild(addrLab);
+
+    var addrRow = h('div');
+    addrRow.style.cssText = 'display:flex;gap:6px;align-items:stretch';
+
+    var addrIn = document.createElement('input');
+    addrIn.type = 'url';
+    addrIn.value = base;
+    addrIn.placeholder = 'http://192.168.1.5:8788';
+    addrIn.setAttribute('inputmode', 'url');
+    addrIn.setAttribute('autocapitalize', 'off');
+    addrIn.setAttribute('autocomplete', 'off');
+    addrIn.setAttribute('spellcheck', 'false');
+    // font-size 必须 ≥16px，否则 iOS 聚焦时会强制放大整个页面
+    addrIn.style.cssText = 'flex:1;min-width:0;padding:9px 11px;font-size:16px;'
+      + 'border:1px solid var(--border);border-radius:9px;background:var(--surface-2);color:var(--text)';
+    addrRow.appendChild(addrIn);
+
+    var addrSave = h('button', 'btn soft', '保存');
+    addrSave.type = 'button';
+    addrSave.style.cssText = 'flex-shrink:0;padding:0 14px;font-size:13px';
+    addrRow.appendChild(addrSave);
+    addrWrap.appendChild(addrRow);
+
+    var mobileHint = h('div');
+    mobileHint.style.cssText = 'font-size:12px;color:var(--text-3);margin-top:7px;line-height:1.7';
+    mobileHint.innerHTML = '手机请把地址改成电脑上启动服务时显示的<「手机访问」</b>地址（形如 <code>http://192.168.x.x:8788</code>）。'
+      + '手机与电脑必须连同一个 WiFi。<b>若本机地址是 127.0.0.1，手机连不上</b>——它指向手机自己。';
+    addrWrap.appendChild(mobileHint);
+    card.appendChild(addrWrap);
+
+    function saveAddr() {
+      var v = String(addrIn.value || '').trim().replace(/\/+$/, '');
+      try {
+        if (v) localStorage.setItem('lumen.ttsProxy', v);
+        else localStorage.removeItem('lumen.ttsProxy');
+      } catch (e) { /* 忽略 */ }
+      if (T.setProxy) T.setProxy(v);
+      ui.toast('地址已保存，正在检测…');
+      render();
+    }
+    addrSave.onclick = saveAddr;
+    addrIn.onkeydown = function (e) {
+      if (e.key === 'Enter') { e.preventDefault(); saveAddr(); }
+    };
 
     /* --- 状态行 --- */
     var state = h('div');
@@ -399,18 +456,46 @@
           buildVoices();
         })
         .catch(function () {
-          setState('bad', '连不上——服务未启动');
+          /* 区分「服务没启动」与「地址不对/被拦」——手机上最常见的是后者 */
+          var onPhone = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
+          var isLocalHost = /^(https?:\/\/)?(127\.0\.0\.1|localhost|\[?::1\]?)(:|\/|$)/i
+            .test(base) || !/^https?:\/\//i.test(base);
+          setState('bad', isLocalHost
+            ? '连不上——服务未启动'
+            : '连不上——地址不可达');
           tag.className = 'tag warn';
           tag.textContent = '未连接';
           var help = h('div');
           help.style.cssText = 'font-size:12.5px;color:var(--text-2);line-height:1.9;'
             + 'background:var(--surface-2);padding:12px 14px;border-radius:10px;margin-top:12px';
-          help.innerHTML = '在线发音服务没在运行。它是一个独立的小服务，需要单独启动：'
-            + '<br><code style="font-size:12px;background:var(--surface-3);padding:2px 6px;'
-            + 'border-radius:4px">node tools/tts-server.js</code>'
-            + '<br>启动后点右上角「重新检测」。'
-            + '<br>如果网站部署在服务器上，把这个服务挂在域名下，'
-            + '并把地址填成 <code>/tts</code> 即可。';
+          var CODE = 'font-size:12px;background:var(--surface-3);padding:2px 6px;border-radius:4px';
+          if (isLocalHost) {
+            help.innerHTML = '在线发音服务没在运行。它是一个独立的小服务，需要单独启动：'
+              + '<br><code style="' + CODE + '">node tools/tts-server.js</code>'
+              + '<br>启动后点右上角「重新检测」。'
+              + '<br>如果网站部署在服务器上，把这个服务挂在域名下，'
+              + '并把地址填成 <code style="' + CODE + '">/tts</code> 即可。';
+          } else if (onPhone) {
+            help.innerHTML = '你填的是局域网地址（<code style="' + CODE + '">'
+              + esc(base) + '</code>），但连不上。按顺序排查：'
+              + '<br><b>1. 确认电脑上的服务已启动</b>，且窗口里显示了「手机访问」那一行。'
+              + '<br><b>2. 确认地址一致</b>：把这里改成电脑上显示的地址，不要留 <code style="'
+              + CODE + '">127.0.0.1</code>——在手机上它指的是手机自己。'
+              + '<br><b>3. 确认同一 WiFi</b>：手机和电脑必须连同一个路由器，'
+              + '数据流量走WiFi 时不要用蜂窝网。'
+              + '<br><b>4. 放行防火墙</b>：Windows 首次运行 Node 会弹窗，必须勾选'
+              + '「专用网络」允许；若已错过，进「Windows 防火墙 → 允许应用通过防火墙」，'
+              + '把 Node.js 勾上。'
+              + '<br><b>5. 关掉 VPN / 代理软件</b>，它们会接管流量导致本地地址打不开。';
+          } else {
+            help.innerHTML = '地址 <code style="' + CODE + '">' + esc(base)
+              + '</code> 连不上。可能是服务没启动，也可能是网络不通：'
+              + '<br><b>1.</b> 先在电脑上确认服务已启动：'
+              + '<br><code style="' + CODE + '">node tools/tts-server.js</code>'
+              + '<br><b>2.</b> 若地址在局域网内，确认本机与目标机器在同一 WiFi，且防火墙已放行。'
+              + '<br><b>3.</b> 若网站部署在服务器上，把这个服务挂在域名下，'
+              + '并把地址填成 <code style="' + CODE + '">/tts</code> 即可。';
+          }
           if (!voiceBox.dataset.tip) {
             voiceBox.dataset.tip = '1';
             var tipWrap = h('div');

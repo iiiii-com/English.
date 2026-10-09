@@ -482,8 +482,44 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-server.listen(PORT, () => {
-  console.log('[tts] 发音代理已启动  http://127.0.0.1:' + PORT);
+/* 列出本机可供手机访问的局域网地址。
+   手机不能用 127.0.0.1 —— 那个地址在手机上指向手机自己，不是这台电脑。 */
+function lanAddresses() {
+  const nets = require('os').networkInterfaces();
+  const out = [];
+  for (const name of Object.keys(nets)) {
+    for (const n of nets[name] || []) {
+      // 只取 IPv4，且排除回环与虚拟网卡常见的 169.254 段
+      if (n.family !== 'IPv4' && n.family !== 4) continue;
+      if (!n.address || n.internal) continue;
+      if (n.address.startsWith('169.254.')) continue;
+      out.push({ name, address: n.address });
+    }
+  }
+  return out;
+}
+
+server.listen(PORT, '0.0.0.0', () => {
+  /* 必须绑 0.0.0.0 而不是默认的 127.0.0.1。
+     不指定 host 时 Node 只绑回环，手机就算和电脑在同一个 WiFi 下也连不上，
+     表现为「电脑上好好的，手机上就是没声音」——
+     这是最容易被误判成 App 坏了的情况。
+     这里只返回公开的发音音频、无鉴权无用户数据，局域网可访问风险可控。*/
+  console.log('');
+  console.log('[tts] 发音代理已启动');
+  console.log('');
+  console.log('     本机访问：http://127.0.0.1:' + PORT);
+  const lan = lanAddresses();
+  if (lan.length) {
+    console.log('     手机访问（需与电脑同一 WiFi）：');
+    lan.forEach(n => console.log('       http://' + n.address + ':' + PORT + '   (' + n.name + ')'));
+  } else {
+    console.log('     手机访问：未检测到局域网地址，请检查是否已连接 WiFi');
+  }
+  console.log('');
+  console.log('[tts] 在手机浏览器打开网站后，进「发音设置」把服务地址填成上面的局域网地址。');
+  console.log('[tts] 若连不上，多半是电脑防火墙拦截了 ' + PORT + ' 端口，需要放行。');
+  console.log('');
   console.log('[tts] 依赖：' + (MsEdgeTTS ? 'msedge-tts ✓' : 'msedge-tts ✗（请在 tools/ 下 npm install）'));
   console.log('[tts] 缓存目录：' + CACHE_DIR);
   console.log('[tts] 音色数：' + Object.keys(VOICES).length + '  限流：' + RATE_LIMIT + '/分钟');
