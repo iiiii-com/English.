@@ -13,12 +13,32 @@
   var countdownTimer = null;
 
   V.account = function (root) {
+    var inApp = global.PWA && global.PWA.isNativeShell && global.PWA.isNativeShell();
     var head = h('div', 'page-head');
-    head.appendChild(h('h1', null, '账号与云同步'));
+    head.appendChild(h('h1', null, inApp ? '账号与云同步（App 版）' : '账号与云同步'));
     head.appendChild(h('p', null,
-      '学习数据默认存在本机浏览器。登录后可自动备份到云端，换设备时进度不丢。' +
-      '不登录也完全能用——只是数据换设备不会自动同步。'));
+      inApp
+        ? 'App 版全部内容已随安装包内置，断网也能完整使用。学习记录默认存在本机；' +
+          '如果你想在多台设备间同步进度，可以再登录云端。不登录也完全能用。'
+        : '学习数据默认存在本机浏览器。登录后可自动备份到云端，换设备时进度不丢。' +
+          '不登录也完全能用——只是数据换设备不会自动同步。'));
     root.appendChild(head);
+
+    // App 版额外说明：离线能力与数据存放位置
+    if (inApp) {
+      var note = h('div', 'card');
+      note.style.cssText = 'margin-bottom:16px;border-left:3px solid var(--primary)';
+      var nh = h('div');
+      nh.appendChild(h('h3', null, '关于离线使用'));
+      nh.appendChild(h('p', null,
+        '· 5449 词库、全部场景口语与分级阅读都已内置，安装后无需联网即可学习\n' +
+        '· 学习进度保存在手机本地，卸载应用会一并清除，重要数据建议登录云端备份\n' +
+        '· 发音使用手机自带的语音合成，若没有声音请在系统设置里安装英语语音包'));
+      nh.lastChild.style.whiteSpace = 'pre-line';
+      nh.lastChild.style.cssText = 'font-size:13px;line-height:1.7;color:var(--text-2);white-space:pre-line';
+      note.appendChild(nh);
+      root.appendChild(note);
+    }
 
     var body = h('div');
     root.appendChild(body);

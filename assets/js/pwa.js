@@ -15,6 +15,12 @@
   var deferredPrompt = null;
   var swReg = null;
 
+  /** 是否运行在 Android 原生外壳内（APK） */
+  function isNativeShell() {
+    return /EngLearnAndroid/i.test(global.navigator.userAgent)
+      || (global.AndroidBridge && typeof global.AndroidBridge.getPlatform === 'function');
+  }
+
   /** 是否以独立窗口（已安装）方式运行 */
   function isStandalone() {
     return (global.matchMedia && global.matchMedia('(display-mode: standalone)').matches)
@@ -79,6 +85,9 @@
     if (!('serviceWorker' in global.navigator)) return;
     // file:// 协议不支持 SW，静默跳过
     if (location.protocol === 'file:') return;
+    // 原生外壳内资源已随包分发，不需要 SW 缓存层；
+    // 反而可能缓存住旧版本资源，导致更新不及时。
+    if (isNativeShell()) return;
 
     global.navigator.serviceWorker.register('sw.js').then(function (reg) {
       swReg = reg;
@@ -103,6 +112,13 @@
   }
 
   function init() {
+    // 原生外壳：不需要安装引导，也不注册 SW
+    if (isNativeShell()) {
+      var btn0 = document.getElementById('installBtn');
+      if (btn0) btn0.hidden = true;
+      return;
+    }
+
     global.addEventListener('beforeinstallprompt', function (e) {
       e.preventDefault();
       deferredPrompt = e;
@@ -138,9 +154,11 @@
     promptInstall: promptInstall,
     canInstall: canInstall,
     isStandalone: isStandalone,
+    isNativeShell: isNativeShell,
     platformHint: platformHint,
     diagnose: function () {
       return {
+        nativeShell: isNativeShell(),
         standalone: isStandalone(),
         hasPrompt: !!deferredPrompt,
         swSupported: 'serviceWorker' in global.navigator,

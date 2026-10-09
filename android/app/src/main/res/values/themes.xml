@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 主题色与应用内 #4f7cff 保持一致 -->
+    <style name="AppTheme" parent="Theme.AppCompat.DayNight.NoActionBar">
+        <item name="colorPrimary">#4f7cff</item>
+        <item name="colorPrimaryDark">#3a60d6</item>
+        <item name="colorAccent">#4f7cff</item>
+        <item name="android:statusBarColor">#4f7cff</item>
+        <item name="android:navigationBarColor">#ffffff</item>
+        <item name="android:windowBackground">#f6f8fc</item>
+    </style>
+</resources>

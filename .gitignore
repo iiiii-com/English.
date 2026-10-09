@@ -11,3 +11,20 @@ Thumbs.db
 # 本地数据备份（不应进仓库）
 *.json.bak
 _backup/
+
+# ---- Android 构建相关 ----
+# Gradle / Android SDK 路径与构建缓存
+android/local.properties
+android/.gradle/
+android/build/
+android/app/build/
+android/app/src/main/assets/web/
+.gradle/
+
+# 签名密钥：绝不能进仓库
+*.keystore
+*.jks
+
+# 构建产物
+android/app-release.apk
+android/app-release.aab

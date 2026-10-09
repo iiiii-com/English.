@@ -1,0 +1,65 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'com.englearn.app'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId "com.englearn.app"
+        minSdk 24              // Android 7.0，覆盖绝大多数在用机型
+        targetSdk 34
+        versionCode 1
+        versionName "1.0.0"
+    }
+
+    signingConfigs {
+        // 用调试签名，保证 APK 可直接安装；正式上架需换成正式签名
+        release {
+            storeFile file("../debug.keystore")
+            storePassword 'android'
+            keyAlias 'androiddebugkey'
+            keyPassword 'android'
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false         // 纯资源壳，无需混淆
+            shrinkResources false
+            signingConfig signingConfigs.release
+        }
+        debug {
+            minifyEnabled false
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    dependencies {
+        implementation 'androidx.appcompat:appcompat:1.6.1'
+        // WebViewAssetLoader：把 assets 以 https 虚拟域名暴露，
+        // 让 Service Worker / localStorage / fetch 在外壳内正常工作
+        implementation 'androidx.webkit:webkit:1.10.0'
+    }
+
+    // 网页资源已压缩过，aapt 不再二次压缩，避免安装包膨胀
+    androidResources {
+        noCompress 'js', 'json'
+    }
+
+    packagingOptions {
+        resources {
+            excludes += ['META-INF/**']
+        }
+    }
+}
+
+// 不把网页资源放进 assets 参与压缩，直接原样打包
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+}
