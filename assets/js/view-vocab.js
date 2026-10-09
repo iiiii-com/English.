@@ -372,8 +372,14 @@
       var sb = h('button', 'speak-btn', '🔊');
       sb.title = '朗读（点击慢速再点一次放慢）';
       sb.onclick = function () {
-        if (sb.classList.contains('playing')) { speechSynthesis.cancel(); sb.classList.remove('playing'); }
-        else { ui.tts.speak(w.w); sb.classList.add('playing'); }
+        if (sb.classList.contains('playing')) { ui.tts.stop(); sb.classList.remove('playing'); return; }
+        ui.tts.speak(w.w, {
+          onend: function () { sb.classList.remove('playing'); },
+          onerror: function () { sb.classList.remove('playing'); }
+        });
+        sb.classList.add('playing');
+        // 兜底：引擎异常时不要让按钮永久卡在播放态
+        setTimeout(function () { if (!ui.tts.isSpeaking()) sb.classList.remove('playing'); }, 8000);
       };
       wrow.appendChild(sb);
       var wtxt = h('div');

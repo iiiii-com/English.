@@ -38,36 +38,16 @@
     return dt.getFullYear() + '年' + (dt.getMonth() + 1) + '月' + dt.getDate() + '日';
   }
 
-  /* 语音合成 */
+  /* 语音合成：统一走 tts.js 引擎，这里只做薄委托，保持 ui.tts 接口不变 */
   var tts = {
-    get voice() {
-      if (S.state.settings.ttsVoice) {
-        var v = speechSynthesis.getVoices().find(function (x) { return x.name === S.state.settings.ttsVoice; });
-        if (v) return v;
-      }
-      var list = speechSynthesis.getVoices();
-      return list.find(function (v) { return /en-US/i.test(v.lang) && /Google|Samantha|Microsoft|Ava/i.test(v.name); })
-        || list.find(function (v) { return /en-US/i.test(v.lang); })
-        || list.find(function (v) { return /^en/i.test(v.lang); })
-        || null;
-    },
-    speak: function (text, rate) {
-      if (!global.speechSynthesis) { toast('当前浏览器不支持语音朗读'); return; }
-      speechSynthesis.cancel();
-      var u = new SpeechSynthesisUtterance(text);
-      var v = this.voice;
-      if (v) u.voice = v;
-      u.lang = 'en-US';
-      u.rate = rate || S.state.settings.ttsRate || 0.9;
-      u.pitch = 1;
-      speechSynthesis.speak(u);
-      return u;
-    },
-    slow: function (text) { return this.speak(text, 0.55); }
+    speak: function (text, opts) { return global.TTS.speak(text, opts); },
+    slow: function (text, opts) { return global.TTS.slow(text, opts); },
+    stop: function () { global.TTS.stop(); },
+    speakSequence: function (items, opts) { return global.TTS.speakSequence(items, opts); },
+    isSpeaking: function () { return global.TTS.isSpeaking(); },
+    diagnose: function () { return global.TTS.diagnose(); },
+    supported: function () { return global.TTS.supported(); }
   };
-  global.speechSynthesis && (function () {
-    speechSynthesis.onvoiceschanged = function () { };
-  })();
 
   /* ---------------- 语音识别 ---------------- */
   var SR = global.SpeechRecognition || global.webkitSpeechRecognition;
@@ -909,6 +889,8 @@
     global.__booted = true;
     S.init();
     if (global.Progress) global.Progress.init();
+    if (global.TTS) global.TTS.init();
+    if (global.PWA) global.PWA.init();
     buildNav();
     window.addEventListener('hashchange', function () {
       var id = location.hash.slice(1);

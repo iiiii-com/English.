@@ -91,6 +91,32 @@ a { color: var(--primary); text-decoration: none; }
   white-space: nowrap;
 }
 .streak-chip.zero { background: var(--surface-2); color: var(--text-3); }
+
+/* ---------------- 安装为 App ---------------- */
+.install-btn {
+  display: inline-flex; align-items: center; gap: 5px;
+  background: var(--primary); color: #fff;
+  padding: 6px 13px; border-radius: 999px;
+  font-size: 13px; font-weight: 700; white-space: nowrap;
+  box-shadow: 0 1px 4px rgba(79,124,255,.28);
+  transition: transform .15s ease, box-shadow .15s ease, filter .15s ease;
+}
+.install-btn:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(79,124,255,.32); }
+.install-btn:active { transform: none; filter: brightness(.95); }
+.install-btn .ib-ico { font-size: 12px; line-height: 1; }
+
+/* 独立窗口（已安装为 App）下适配状态栏与刘海屏 */
+@media (display-mode: standalone) {
+  .topbar { padding-top: env(safe-area-inset-top); }
+  .wrap { padding-bottom: calc(60px + env(safe-area-inset-bottom)); }
+  .install-btn { display: none !important; }
+}
+
+/* 触屏设备隐藏按钮文字，只留图标，避免挤压顶栏 */
+@media (hover: none) and (max-width: 760px) {
+  .install-btn { padding: 6px 11px; }
+  .install-btn .ib-txt { display: none; }
+}
 .icon-btn {
   width: 32px; height: 32px; border-radius: 8px; display: grid; place-items: center;
   color: var(--text-2); font-size: 16px;

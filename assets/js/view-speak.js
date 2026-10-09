@@ -191,11 +191,21 @@
     act.style.marginTop = '14px';
     var all = h('button', 'btn soft', '▶ 连续朗读全段');
     all.onclick = function () {
-      speechSynthesis.cancel();
-      sc.lines.forEach(function (l, i) {
-        var u = ui.tts.speak(l.en);
-        if (u) u.onend = function () { if (i < sc.lines.length - 1) setTimeout(function () { ui.tts.speak(sc.lines[i + 1].en); }, 420); };
+      // 连续朗读：交给 TTS 队列顺序播放。
+      // 旧实现逐句调用 speak()，而 speak() 内部会 cancel()，导致只有最后一句发声。
+      ui.tts.speakSequence(sc.lines.map(function (l) { return { text: l.en }; }), {
+        onprogress: function (i) {
+          var rows = box.querySelectorAll('.line-row');
+          for (var k = 0; k < rows.length; k++) rows[k].style.background = (k === i ? 'var(--primary-soft)' : '');
+        },
+        onend: function () {
+          var rows = box.querySelectorAll('.line-row');
+          for (var k = 0; k < rows.length; k++) rows[k].style.background = '';
+          all.textContent = '▶ 连续朗读全段';
+        }
       });
+      all.textContent = '⏸ 停止朗读';
+      all.onclick = function () { ui.tts.stop(); all.textContent = '▶ 连续朗读全段'; };
     };
     act.appendChild(all);
     var done = h('button', 'btn', '✓ 完成本场景');
