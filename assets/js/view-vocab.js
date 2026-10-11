@@ -68,6 +68,76 @@
     note.appendChild(nt);
     root.appendChild(note);
 
+    /* ---------------- 快捷通道 ----------------
+       原先「四六级」「核心词精讲」各占一个标签页，与浏览页功能重叠：
+       四六级本质 = 带考纲筛选的词表；核心词精讲 = 30 张固定卡片。
+       独立标签让词汇模块从 4 个标签膨胀到 6 个，寻址成本高于信息价值。
+       收进这里后，一次寻址就能到全部词汇能力。 */
+    var shortcut = h('div', 'card');
+    shortcut.style.marginTop = 'var(--sp-4)';
+    var sch = h('div', 'card-head');
+    sch.appendChild(h('h3', null, '快捷通道'));
+    shortcut.appendChild(sch);
+
+    var VF = global.VocabFreq;
+    if (VF && VF.exams().length) {
+      /* ---- 考纲速达：点了就地筛选，不再跳页 ---- */
+      var examRow = h('div');
+      examRow.style.cssText = 'display:flex;gap:var(--sp-2);flex-wrap:wrap;margin-bottom:var(--sp-2)';
+      VF.exams().forEach(function (e2) {
+        var eb = h('button', 'chip-btn', e2.name + ' ' + e2.count);
+        eb.type = 'button';
+        eb.title = e2.full + ' · 共 ' + e2.count + ' 词，独有 ' + e2.exclusive
+          + '。点击按「考试内 + 高频优先」列出。';
+        eb.onclick = function () { applyExam(e2.id); };
+        examRow.appendChild(eb);
+      });
+      shortcut.appendChild(examRow);
+      var hint = h('div');
+      hint.style.cssText = 'font-size:var(--fs-sm);color:var(--text-3);margin-bottom:var(--sp-3)';
+      hint.textContent = '点击考纲按「考试内优先 + 高频优先」列出词表。';
+      shortcut.appendChild(hint);
+    }
+
+    /* 两个可展开区：四六级洞察 / 核心功能词精讲。
+       用原生 <details>：免维护开合状态，键盘与读屏天然可用。 */
+    var dCet = document.createElement('details');
+    dCet.style.cssText = 'border-top:1px solid var(--border);padding-top:var(--sp-3);margin-top:var(--sp-2)';
+    var dCetSum = h('summary', null, '四六级怎么背（88% 重叠的真相）');
+    dCetSum.style.cssText = 'cursor:pointer;font-weight:600;font-size:var(--fs-base);user-select:none';
+    dCet.appendChild(dCetSum);
+    var cetBox = h('div');
+    cetBox.style.marginTop = 'var(--sp-3)';
+    dCet.appendChild(cetBox);
+    dCet.addEventListener('toggle', function () {
+      if (dCet.open && !cetBox.dataset.done) {
+        /* 先注入就地筛选再渲染——cetView 内部会读 applyExamFn，
+           顺序反了会让「列出该考纲」按钮消失 */
+        applyExamFn = applyExam;
+        cetView(cetBox);              // 首次展开才渲染，省一次建 DOM
+        cetBox.dataset.done = '1';
+      }
+    });
+    shortcut.appendChild(dCet);
+
+    var dCore = document.createElement('details');
+    dCore.style.cssText = 'border-top:1px solid var(--border);padding-top:var(--sp-3);margin-top:var(--sp-2)';
+    var dCoreSum = h('summary', null, '高频功能词精讲');
+    dCoreSum.style.cssText = 'cursor:pointer;font-weight:600;font-size:var(--fs-base);user-select:none';
+    dCore.appendChild(dCoreSum);
+    var coreBox = h('div');
+    coreBox.style.marginTop = 'var(--sp-3)';
+    dCore.appendChild(coreBox);
+    dCore.addEventListener('toggle', function () {
+      if (dCore.open && !coreBox.dataset.done) {
+        coreView(coreBox);
+        coreBox.dataset.done = '1';
+      }
+    });
+    shortcut.appendChild(dCore);
+
+    root.appendChild(shortcut);
+
     var box = h('div');
     box.id = 'browseBox';
     box.style.marginTop = '16px';
@@ -200,6 +270,38 @@
           btn.textContent = label;
           ui.toast('词库分片加载失败，请检查网络后重试', { type: 'error' });
         });
+    }
+
+    /**
+     * 就地应用考纲筛选（快捷通道与四六级洞察共用）。
+     * cet4/cet6 的词分布在 L5/L6 分片里，必须先加载分片再筛，
+     * 否则列表为空——「点了按钮什么都没发生」的典型成因。
+     */
+    function applyExam(examId) {
+      state.exam = examId;
+      state.sort = 'PRIORITY';    // 按考纲进来，自然按「考试内 + 高频优先」排
+      state.page = 0;
+      /* 同步筛选按钮的高亮态——否则按钮显示「全部考纲」，
+         列表却是筛过的，状态与视觉不一致 */
+      ui.$$('button', filters).forEach(function (x) {
+        if (x.dataset.k === 'exam') x.classList.toggle('on', x.dataset.v === examId);
+        if (x.dataset.k === 'sort') x.classList.toggle('on', x.dataset.v === 'PRIORITY');
+      });
+      var ex = VF && VF.exam(examId);
+      if (ex) {
+        var ready = global.GAOKAO_L5 && global.GAOKAO_L6;
+        if (!ready) {
+          ui.toast('正在加载「' + ex.name + '」词库…');
+          Promise.all([S.ensureLevel('L5'), S.ensureLevel('L6')])
+            .then(renderList)
+            .catch(function () {
+              ui.toast('词库加载失败，请检查网络后重试', { type: 'error' });
+            });
+          return;
+        }
+        ui.toast('已按「' + ex.name + '」筛选，按高频优先排序');
+      }
+      renderList();
     }
 
     var themeSel = h('select', 'input');
@@ -1333,10 +1435,21 @@
   /* ============================================================
      D. 核心词精讲
      ============================================================ */
+  /* ============================================================
+     核心功能词精讲 —— 已并入「全库浏览」快捷通道
+     ------------------------------------------------------------
+     原先独立成标签页的问题：30 个词的精讲卡撑不起一个一级入口，
+     用户为看一眼要切一次页签。现在由浏览页的 <details> 展开。
+     独立页标题（page-head h1）已删，改为区内小标题。
+     ============================================================ */
   function coreView(root) {
-    var head = h('div', 'page-head');
-    head.appendChild(h('h1', null, '核心词精讲'));
-    head.appendChild(h('p', null, '这 ' + VC.CORE.length + ' 个词是英语最高频的功能核心。零基础优先掌握它们，性价比远高于背冷僻词。'));
+    var head = h('div');
+    head.style.cssText = 'margin-bottom:var(--sp-3)';
+    head.appendChild(h('h3', null, '高频功能词'));
+    var p = h('p', null,
+      '这 ' + VC.CORE.length + ' 个词是英语最高频的功能核心。零基础优先掌握它们，性价比远高于背冷僻词。');
+    p.style.cssText = 'font-size:var(--fs-base);color:var(--text-2);margin:2px 0 0';
+    head.appendChild(p);
     root.appendChild(head);
 
     var grid = h('div', 'grid g2');
@@ -1474,17 +1587,16 @@
   /* ============================================================
      四六级 —— 按考纲组织词表
      ------------------------------------------------------------
-     为什么单独做一个视图，而不是只在筛选栏加两个选项：
+     已并入「全库浏览」顶部：原先独立成标签页时与浏览页功能重叠
+     （四六级本质 = 带考纲筛选的词表），且多一个标签就多一次寻址。
+     现在由 browseView 的快捷通道 <details> 调用，本函数只负责渲染。
 
-     筛选栏解决的是「我要找某个词」，而四六级真正要回答的问题是
-     「这个考试要背哪些词、先背哪些」。前者是一次查询，
-     后者是长期学习计划，信息密度完全不同。
-
-     并且要如实告诉用户一个反直觉的事实：四级考纲并非六级考纲的
-     等比缩小版——实测四级 2052 词里有 1802 词六级也要，
-     真正只属于四级的只有 250 词。
-     「背完四级再背六级」的线性预期会误导学习者，
-     让他们以为六级只是四级的加法。
+     职责保留两块：
+       a. 四六级关系的洞察（88% 重叠、六级真正增量 696 词）
+          —— 这是数据推翻直觉的结论，必须让用户看到；
+       b. 各考纲的词频分层图 —— 回答「这个考试该按什么顺序背」。
+     「考纲总览」8 张统计卡已删：词数在快捷通道按钮上就有，
+     单独占一屏的信息密度太低。
      ============================================================ */
   function cetView(root) {
     var VFm = global.VocabFreq;
@@ -1499,33 +1611,8 @@
       return;
     }
 
-    /* ---- 概览：各考纲规模 ---- */
-    var ov = h('div', 'card');
-    var oh = h('div', 'card-head');
-    oh.appendChild(h('h3', null, '考纲总览'));
-    oh.appendChild(h('span', 'tag blue', '按使用频率分层'));
-    ov.appendChild(oh);
-
-    /* 用既有的 .grid.g4——项目里没有 .stat-grid 这个类，
-       写成不存在的类名会让卡片退化成块级竖排。 */
-    var og = h('div', 'grid g4');
-    VFm.exams().forEach(function (e2) {
-      var c = h('div', 'stat');
-      c.appendChild(h('div', 'lbl', e2.name));
-      var v = h('div', 'val', String(e2.count));
-      var s = h('small', null, '词');
-      v.appendChild(s);
-      c.appendChild(v);
-      /* 独占词才是「这个考试特有」的部分。
-         对考研/托福这类已被别的考纲覆盖大半的体系，独占数很小，
-         这是真实情况，不该用「核心词」这类说法把它包装得很大。 */
-      c.appendChild(h('div', 'delta', '本考纲独有 ' + e2.exclusive + ' 词'));
-      og.appendChild(c);
-    });
-    ov.appendChild(og);
-    box.appendChild(ov);
-
-    /* ---- 四六级关系：把反直觉的事实讲清楚 ---- */
+    /* 「考纲总览」8 张统计卡已删——词数在快捷通道按钮上就有，
+       独占一屏的信息密度太低。直接从洞察卡开始。 */
     var ins = VFm.cetInsight();
     if (ins) {
       var ic = h('div', 'card');
@@ -1654,18 +1741,14 @@
         detail.appendChild(tail);
       }
 
-      var go = h('button', 'btn', '在「全库浏览」中打开该考纲的词表');
-      go.type = 'button';
-      go.onclick = function () {
-        /* 必须真的预置筛选，否则 toast 说的「筛选已设为 CET-4」就是假承诺。
-           browseView 的 state 是它的局部变量，
-           所以走 hash 传参，由 browseView 初始化时读取。 */
-        location.hash = 'vocab';
-        curTab = 'browse';
-        pendingBrowse = { exam: cur };
-        switchTab('browse');
-      };
-      detail.appendChild(go);
+      /* 嵌入在浏览页内，「打开该考纲」无需跳转——就地应用筛选。
+         applyExam 由 browseView 注入到本函数（见快捷通道）。 */
+      if (typeof applyExamFn === 'function') {
+        var go = h('button', 'btn sm', '列出 ' + ex.name + ' 的词（高频优先）');
+        go.type = 'button';
+        go.onclick = function () { applyExamFn(cur); };
+        detail.appendChild(go);
+      }
     }
 
     renderDetail();
@@ -1675,14 +1758,14 @@
      跨视图传参只能用模块级变量：
      browseView 每次进入都重建自己的 state，没有对外接口可写。 */
   var pendingBrowse = null;
+  /* cetView 嵌在浏览页内时，由 browseView 注入的就地筛选函数 */
+  var applyExamFn = null;
 
   var TABS = [
     { id: 'review', label: '今日复习', fn: reviewView, desc: '按 SM-2 队列提取复习' },
     { id: 'new', label: '学新词', fn: newView, desc: '分等级分主题的词表' },
-    { id: 'browse', label: '全库浏览', fn: browseView, desc: '全库开放，按等级/考纲/词频查阅' },
-    { id: 'cet', label: '四六级', fn: cetView, desc: '按考纲背词，看清四级与六级的真实关系' },
-    { id: 'quiz', label: '自测', fn: quizView, desc: '动态生成测验' },
-    { id: 'core', label: '核心词精讲', fn: coreView, desc: '高频功能词详解' }
+    { id: 'browse', label: '词库', fn: browseView, desc: '全部词汇：按等级/考纲/词频查阅，含四六级洞察与核心词精讲' },
+    { id: 'quiz', label: '自测', fn: quizView, desc: '动态生成测验' }
   ];
   function switchTab(id) {
     var el = document.getElementById('vocabTabs');

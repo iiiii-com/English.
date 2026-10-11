@@ -31,15 +31,21 @@
       <span class="brand-text">Lumen</span>
     </a>
     <div class="top-right">
-      <span class="stage-bar" id="stageBar" title="">I · 认知输入</span>
       <button class="install-btn" id="installBtn" hidden aria-label="安装为应用">
         <span class="ib-ico">⬇</span><span class="ib-txt">安装 App</span>
       </button>
       <div class="streak-chip zero" id="streakChip" title="连续打卡天数">🔥 0</div>
     </div>
   </div>
+  <!-- 两级导航：主项 6 个（总览/词汇/听说/阅读/学习/工具），
+       子项由 app.js 按当前组填入 #nav。
+       原先 15 项平铺 + 罗马数字分组标题，用户记不住边界，
+       工具类还和学习内容混排。 -->
+  <div class="nav-main-rail">
+    <nav class="nav-main" id="navMain" aria-label="主导航"></nav>
+  </div>
   <div class="nav-rail">
-    <nav class="nav" id="nav" aria-label="主导航"></nav>
+    <nav class="nav" id="nav" aria-label="当前模块子导航"></nav>
   </div>
 </header>
 

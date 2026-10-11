@@ -24,27 +24,43 @@ function check(name, ok, detail) {
   await page.goto(BASE + '/index.html', { waitUntil: 'networkidle' });
   await page.waitForTimeout(1800);
 
-  console.log('\n=== 1. 四阶段导航结构 ===\n');
+  console.log('\n=== 1. 两级导航结构 ===\n');
   const nav = await page.evaluate(() => {
-    const groups = Array.from(document.querySelectorAll('.nav .nav-group')).map(g => g.textContent.trim());
-    const btns = Array.from(document.querySelectorAll('.nav button')).map(b => b.dataset.v);
-    return { groups, btns, total: btns.length };
+    const mainBtns = Array.from(document.querySelectorAll('#navMain button')).map(b => b.dataset.g);
+    const subBtns = Array.from(document.querySelectorAll('#nav button')).map(b => b.dataset.v);
+    return { mainBtns, subBtns, total: mainBtns.length };
   });
-  console.log('  分组:', JSON.stringify(nav.groups));
-  console.log('  模块:', nav.btns.join(' → '));
-  check('导航按四阶段分组', nav.groups.length === 5, nav.groups.length + ' 组（4 阶段 + 工具）');
-  check('第一阶段是认知输入', nav.groups[0].indexOf('I 认知输入') === 0, nav.groups[0]);
-  check('第二阶段是理解解析', nav.groups[1].indexOf('II 理解解析') === 0, nav.groups[1]);
-  check('第三阶段是场景运用', nav.groups[2].indexOf('III 场景运用') === 0, nav.groups[2]);
-  check('第四阶段是审美拓展', nav.groups[3].indexOf('IV 审美拓展') === 0, nav.groups[3]);
-  check('词根词缀在理解解析阶段', nav.btns.indexOf('roots') > nav.btns.indexOf('vocab')
-    && nav.btns.indexOf('roots') < nav.btns.indexOf('speak'), '排在词汇之后、口语之前');
-  check('诗歌在审美拓展阶段', nav.btns.indexOf('poetry') > nav.btns.indexOf('read'));
-  check('新增两个模块已注册', nav.btns.indexOf('roots') >= 0 && nav.btns.indexOf('poetry') >= 0);
-  check('顶栏显示当前阶段', await page.evaluate(() => {
-    const s = document.getElementById('stageBar');
-    return s && /I · 认知输入/.test(s.textContent);
-  }));
+  console.log('  主项:', nav.mainBtns.join(' → '));
+  console.log('  当前组子项:', nav.subBtns.join(' → '));
+  /* 两级导航取代 15 项平铺 + 罗马数字分组标题：
+     主项按用户任务归组，子项只在当前组出现。 */
+  check('主项 6 个按任务归组',
+    nav.total === 6
+    && nav.mainBtns.join(',') === 'home,vocab,oral,read,study,tools',
+    nav.mainBtns.join(' / '));
+  check('默认落在总览组', nav.subBtns.join(',') === 'dash', nav.subBtns.join(','));
+  check('全部 15 个视图仍可达（hash 兼容）', (await page.evaluate(async () => {
+    const all = ['dash', 'path', 'vocab', 'english', 'roots', 'phoneme', 'psych',
+      'progress', 'speak', 'dailycomm', 'read', 'poetry', 'tttsettings', 'account', 'data'];
+    /* hashchange 是异步分发的，每次切换要等一帧让 render 完成，
+       同步循环查 DOM 会拿到上一个视图的子导航 */
+    const wait = () => new Promise(r => setTimeout(r, 90));
+    for (const id of all) {
+      location.hash = id;
+      await wait();
+      const has = !!document.querySelector('#nav button[data-v="' + id + '"]');
+      if (!has) return false;
+      if (document.getElementById('navMain').querySelectorAll('button').length !== 6) return false;
+    }
+    return true;
+  })));
+  check('工具类归入工具组而非混排学习内容', (await page.evaluate(() => {
+    location.hash = 'account';
+    return new Promise(res => setTimeout(() => {
+      const sub = [...document.querySelectorAll('#nav button')].map(b => b.dataset.v);
+      res(sub.join(',') === 'tttsettings,account,data');
+    }, 120));
+  })));
 
   console.log('\n=== 2. 词根词缀模块 ===\n');
   await page.evaluate(() => { location.hash = 'roots'; });
@@ -330,6 +346,7 @@ function check(name, ok, detail) {
 
   const navD = await page.evaluate(() => {   // 当前是 1440px 宽屏
     const nav = document.getElementById('nav');
+    const main = document.getElementById('navMain');
     const bt = document.querySelector('.brand-text');
     const cs = getComputedStyle(nav);
     const rail = document.querySelector('.nav-rail');
@@ -342,20 +359,72 @@ function check(name, ok, detail) {
       overflowX: cs.overflowX,
       flexWrap: cs.flexWrap,
       maskNone: getComputedStyle(rail).maskImage === 'none',
-      btns: nav.querySelectorAll('button').length,
-      groups: nav.querySelectorAll('.nav-group').length
+      /* 两级导航：主项 6 个 + 当前组子项（≤4 个） */
+      mainBtns: main ? main.querySelectorAll('button').length : 0,
+      subBtns: nav.querySelectorAll('button').length,
+      subLabels: [...nav.querySelectorAll('button')].map(b => b.textContent.trim()),
+      mainLabels: main ? [...main.querySelectorAll('button')].map(b => b.textContent.trim()) : []
     };
   });
   check('站名为 Lumen', navD.brand === 'Lumen', navD.brand);
   check('桌面端站名可见', navD.brandVisible === true, 'brand-text display');
   check('导航 min-width 已解绑', navD.minW === '0px', navD.minW);
-  check('导航按钮与分组齐全', navD.btns === 15 && navD.groups === 5,
-    navD.btns + ' 按钮 / ' + navD.groups + ' 分组');
+  /* 两级导航：主项收敛为 6 个，替代原 15 项平铺 + 5 个罗马数字分组标题 */
+  check('主项收敛为 6 个', navD.mainBtns === 6,
+    navD.mainBtns + ' 个: ' + navD.mainLabels.join('/'));
+  check('子项属当前组且不超过 4 个',
+    navD.subBtns >= 1 && navD.subBtns <= 4,
+    navD.subBtns + ' 个: ' + navD.subLabels.join('/'));
   // 宽屏换行：全部项目一次可见，不该再有横向滚动
   check('宽屏导航换行显示（全部可见，无需滚动）',
     navD.flexWrap === 'wrap' && navD.scrollW <= navD.clientW + 2,
     navD.scrollW + ' ≤ ' + navD.clientW + ' (wrap=' + navD.flexWrap + ')');
   check('宽屏取消两侧渐隐', navD.maskNone === true);
+
+  /* 两级导航的行为验证：点主项进该组子页、子项切换、组间记忆 */
+  const navBeh = await page.evaluate(() => {
+    const main = document.getElementById('navMain');
+    /* 点「听说」主项 → 应回到该组首个子页（音标口型） */
+    const oral = [...main.querySelectorAll('button')].find(b => b.dataset.g === 'oral');
+    oral.click();
+    return new Promise(res => setTimeout(() => {
+      const sub = [...document.querySelectorAll('#nav button')].map(b => b.dataset.v);
+      const cur = location.hash.replace('#', '');
+      res({ sub, cur, hash: location.hash });
+    }, 120));
+  });
+  check('点「听说」主项进入组内子页',
+    ['phoneme', 'speak', 'dailycomm'].indexOf(navBeh.cur) > -1,
+    'hash=' + navBeh.hash + ' 子项=' + navBeh.sub.join('/'));
+  check('子导航显示的是听说组的内容',
+    navBeh.sub.join(',') === 'phoneme,speak,dailycomm', navBeh.sub.join(','));
+
+  /* 组间记忆：词汇组内进词根词缀 → 去听说 → 回词汇，应落回词根词缀 */
+  await page.evaluate(() => {
+    const main = document.getElementById('navMain');
+    [...main.querySelectorAll('button')].find(b => b.dataset.g === 'vocab').click();
+  });
+  await page.waitForTimeout(120);
+  await page.evaluate(() => {
+    const sub = document.getElementById('nav');
+    [...sub.querySelectorAll('button')].find(b => b.dataset.v === 'roots').click();
+  });
+  await page.waitForTimeout(120);
+  await page.evaluate(() => {
+    const main = document.getElementById('navMain');
+    [...main.querySelectorAll('button')].find(b => b.dataset.g === 'oral').click();
+  });
+  await page.waitForTimeout(120);
+  const backHash = await page.evaluate(() => {
+    const main = document.getElementById('navMain');
+    [...main.querySelectorAll('button')].find(b => b.dataset.g === 'vocab').click();
+    return new Promise(res => setTimeout(() => res(location.hash), 120));
+  });
+  check('回组时落在上次访问的子页（词根词缀）',
+    backHash === '#roots', 'hash=' + backHash);
+  /* 回总览，避免影响后续断言 */
+  await page.goto(BASE + '/index.html', { waitUntil: 'domcontentloaded' });
+  await page.waitForTimeout(1200);
 
   // 首项必须完整可见，不能被推出视野
   const firstBtn = await page.evaluate(() => {
@@ -592,39 +661,41 @@ function check(name, ok, detail) {
   /* ---------- 7c. 移动端可达性 ---------- */
   console.log('\n=== 7c. 移动端可达性 ===\n');
 
-  /* 窄屏导航必须仍然是横向滚动。
-     宽屏改成换行是刻意的，但窄屏下 15 个项目永远放不下，
-     换行会把顶栏撑到四五行高，反而更糟。 */
+  /* 窄屏下两级导航的断言：
+     主项 6 个必须一行放下（这是收敛主项数量的核心验收），
+     子项 ≤4 个 + 渐隐保留。原先 15 项平铺时这里只能横向滚动，
+     现在主项一行 + 子项一行，用户不再需要滑动找导航。 */
   const pNav = await browser.newPage();
   await pNav.setViewportSize({ width: 390, height: 844 });
   await pNav.goto(BASE, { waitUntil: 'domcontentloaded' });
   await pNav.waitForTimeout(1200);
   const navNarrow = await pNav.evaluate(() => {
     const nav = document.getElementById('nav');
+    const main = document.getElementById('navMain');
     const cs = getComputedStyle(nav);
     const rail = document.querySelector('.nav-rail');
-    const nl = nav.getBoundingClientRect();
-    const b = nav.querySelector('button');
-    const bl = b.getBoundingClientRect();
+    const mrail = document.querySelector('.nav-main-rail');
     return {
       clientW: nav.clientWidth,
       scrollW: nav.scrollWidth,
       overflowX: cs.overflowX,
       flexWrap: cs.flexWrap,
       maskOn: getComputedStyle(rail).maskImage !== 'none',
-      navL: nl.left, navR: nl.right, btnL: bl.left, btnR: bl.right,
-      hasH: rail.getBoundingClientRect().height
+      /* 主项 6 个在 390px 下必须全部可见，不允许横向滚动 */
+      mainW: main.scrollWidth,
+      mainClientW: main.clientWidth,
+      mainBtns: main.querySelectorAll('button').length,
+      mainH: mrail.getBoundingClientRect().height,
+      subH: rail.getBoundingClientRect().height
     };
   });
-  check('窄屏导航拿到的宽度足够', navNarrow.clientW >= 360, navNarrow.clientW + 'px');
-  check('窄屏导航保持横向滚动（不放不下时换行会撑爆顶栏）',
-    navNarrow.flexWrap === 'nowrap' && navNarrow.overflowX === 'auto'
-    && navNarrow.scrollW > navNarrow.clientW,
-    navNarrow.flexWrap + '/' + navNarrow.overflowX + ' '
-    + navNarrow.scrollW + '>' + navNarrow.clientW);
-  check('窄屏保留两侧渐隐（提示可横向滚动）', navNarrow.maskOn === true);
-  check('窄屏导航不换行（顶栏高度可控）',
-    navNarrow.hasH < 90, navNarrow.hasH.toFixed(0) + 'px');
+  check('窄屏主项 6 个全部可见（不横向滚动）',
+    navNarrow.mainBtns === 6 && navNarrow.mainW <= navNarrow.mainClientW + 2,
+    navNarrow.mainW + ' ≤ ' + navNarrow.mainClientW);
+  check('窄屏顶栏两行合计不超过 118px（主行+子行）',
+    navNarrow.mainH + navNarrow.subH < 118,
+    '主 ' + navNarrow.mainH.toFixed(0) + ' + 子 ' + navNarrow.subH.toFixed(0));
+  check('窄屏子导航保留渐隐（子项可能溢出）', navNarrow.maskOn === true);
   await pNav.close();
 
   // 关键点：Node 的 server.listen(PORT) 默认只绑 127.0.0.1，
@@ -1024,57 +1095,96 @@ function check(name, ok, detail) {
   const cetUI = await page.evaluate(() => {
     const tabs = [...document.querySelectorAll('#vocabTabs button')].map(b => b.textContent.trim());
     return {
-      hasCet: tabs.indexOf('四六级') > -1,
+      tabs: tabs,
       hasVF: !!window.VocabFreq
     };
   });
-  check('词汇页新增「四六级」标签', cetUI.hasCet);
+  /* 词汇标签从 6 收敛为 4：四六级并入词库快捷通道、核心词精讲并入展开区。
+     独立标签页与浏览页功能重叠，多一个标签就多一次寻址。 */
+  check('词汇标签收敛为 4 个',
+    cetUI.tabs.length === 4 && cetUI.tabs.join('|') === '今日复习|学新词|词库|自测',
+    cetUI.tabs.join(' | '));
 
-  const cetBtn = await page.$('#vocabTabs button[data-t="cet"]');
-  if (cetBtn) {
-    await cetBtn.click();
-    await page.waitForTimeout(900);
-    const cetPage = await page.evaluate(() => ({
-      cards: document.querySelectorAll('#vocabBody .stat').length,
-      examBtns: document.querySelectorAll('#cetSeg button').length,
-      // 考纲卡必须用 grid g4，否则会退化成竖排
-      gridCls: (document.querySelector('#vocabBody .grid') || {}).className || '',
-      hasInsight: /四级独有/.test(document.body.innerText)
-    }));
-    check('四六级页展示全部考纲', cetPage.cards === 8, cetPage.cards + ' 张卡');
-    check('考纲切换按钮齐全', cetPage.examBtns === 8, cetPage.examBtns + ' 个');
-    check('考纲卡使用 grid 布局（避免竖排）',
-      /grid/.test(cetPage.gridCls), cetPage.gridCls);
-    check('已展示四六级关系洞察', cetPage.hasInsight);
-
-    /* 从四六级页跳到浏览页：筛选必须真的预置上，
-       否则就是「toast 说筛了、实际没筛」的假承诺。 */
-    const goBtn = await page.evaluateHandle(() => {
-      return [...document.querySelectorAll('#vocabBody button')]
-        .find(b => /全库浏览/.test(b.textContent));
-    });
-    const goEl = goBtn.asElement();
-    if (goEl) {
-      await goEl.click();
-      await page.waitForTimeout(3500);
-      const after = await page.evaluate(() => {
-        const on = [...document.querySelectorAll('button.on')].map(b => b.dataset.k + '=' + b.dataset.v);
-        return {
-          on: on,
-          rows: document.querySelectorAll('.tbl tbody tr').length,
-          examTags: [...document.querySelectorAll('.tbl tbody tr td:nth-child(6) .tag')]
-            .slice(0, 5).map(t => t.textContent.trim())
-        };
+  /* ---- 快捷通道：考纲速达 + 两个展开区 ---- */
+  const sc = await page.evaluate(() => {
+    /* 切到词库标签 */
+    const tab = [...document.querySelectorAll('#vocabTabs button')]
+      .find(b => b.dataset.t === 'browse');
+    tab.click();
+    return new Promise(res => setTimeout(() => {
+      const body = document.getElementById('vocabBody');
+      const chips = [...body.querySelectorAll('.chip-btn')].map(b => b.textContent.trim());
+      const summaries = [...body.querySelectorAll('summary')].map(s => s.textContent.trim());
+      res({
+        chips: chips,
+        summaries: summaries,
+        hasSearch: !!body.querySelector('input[type=search]')
       });
-      check('跳转后考纲筛选真的生效',
-        after.on.indexOf('exam=cet4') > -1, after.on.join(' '));
-      check('跳转后按优先级排序',
-        after.on.indexOf('sort=PRIORITY') > -1, after.on.join(' '));
-      check('跳转后列表非空', after.rows > 0, after.rows + ' 行');
-      check('列表行的考纲标签与筛选一致',
-        after.examTags.some(t => /CET-4/.test(t)), after.examTags.join(',') || '(空)');
-    }
-  }
+    }, 600));
+  });
+  check('快捷通道展示全部 8 个考纲',
+    sc.chips.length === 8 && /CET-4/.test(sc.chips[0]),
+    sc.chips.join(' '));
+  check('展开区就位（四六级洞察 + 核心词精讲）',
+    sc.summaries.length === 2, sc.summaries.join(' | '));
+  check('查找框仍在（整合未丢失能力）', sc.hasSearch);
+
+  /* 快捷通道点击考纲：必须就地筛选生效，不得只弹 toast */
+  const applied = await page.evaluate(() => {
+    const body = document.getElementById('vocabBody');
+    const btn = [...body.querySelectorAll('.chip-btn')]
+      .find(b => /CET-4/.test(b.textContent));
+    btn.click();
+    return new Promise(res => setTimeout(() => {
+      const on = [...document.querySelectorAll('#vocabBody button.on')]
+        .map(b => (b.dataset.k || '') + '=' + (b.dataset.v || b.textContent.trim()));
+      const rows = document.querySelectorAll('.tbl tbody tr').length;
+      const examTags = [...document.querySelectorAll('.tbl tbody tr td:nth-child(6) .tag')]
+        .slice(0, 4).map(t => t.textContent.trim());
+      res({ on: on.filter(x => /exam|sort/.test(x)), rows, examTags });
+    }, 3500));
+  });
+  check('快捷通道就地应用考纲筛选',
+    applied.on.indexOf('exam=cet4') > -1, applied.on.join(' '));
+  check('快捷通道同时切到优先级排序',
+    applied.on.indexOf('sort=PRIORITY') > -1, applied.on.join(' '));
+  check('考纲词表非空', applied.rows > 0, applied.rows + ' 行');
+  check('列表考纲标签与筛选一致',
+    applied.examTags.some(t => /CET-4/.test(t)), applied.examTags.join(',') || '(空)');
+
+  /* 展开四六级洞察：内容必须真实渲染（懒渲染，首次展开才建 DOM） */
+  const insight = await page.evaluate(() => {
+    const body = document.getElementById('vocabBody');
+    const det = [...body.querySelectorAll('details')]
+      .find(d => /四六级/.test(d.querySelector('summary').textContent));
+    det.open = true;
+    return new Promise(res => setTimeout(() => {
+      const txt = det.textContent;
+      res({
+        has88: /88%|重叠/.test(txt),
+        has696: /696/.test(txt),
+        hasListBtn: [...det.querySelectorAll('button')]
+          .some(b => /高频优先/.test(b.textContent))
+      });
+    }, 700));
+  });
+  check('四六级洞察展开后含重叠率结论', insight.has88);
+  check('洞察含六级增量 696 词', insight.has696);
+  check('洞察内可就地列出考纲词表', insight.hasListBtn);
+
+  /* 展开核心词精讲：确认卡片渲染 */
+  const coreCards = await page.evaluate(() => {
+    const body = document.getElementById('vocabBody');
+    const det = [...body.querySelectorAll('details')]
+      .find(d => /高频功能词/.test(d.querySelector('summary').textContent));
+    if (!det) return { cards: 0, missing: true };
+    det.open = true;
+    return new Promise(res => setTimeout(() => {
+      res({ cards: det.querySelectorAll('.card').length });
+    }, 600));
+  });
+  check('核心词精讲展开后渲染卡片',
+    coreCards.cards > 0, coreCards.cards + ' 张' + (coreCards.missing ? '（未找到展开区）' : ''));
 
   console.log('\n=== 8. 无 JS 异常 ===\n');
   check('无未捕获异常', errs.length === 0, errs.slice(0, 3).join(' | '));

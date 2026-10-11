@@ -866,24 +866,23 @@
       }
     }
 
-    // 激活导航
-    $$('.nav button').forEach(function (b) {
+    /* 激活导航：主项按组亮，子项按视图亮。
+       先记住访问位置再重建子导航——组没变时子项列表不变，
+       组变了则整体换成新组的子项。 */
+    lastVisited[groupOf(current).id] = current;
+    renderSubNav();
+    $$('.nav-main button').forEach(function (b) {
+      var on = b.dataset.g === groupOf(current).id;
+      b.classList.toggle('on', on);
+      if (on) b.setAttribute('aria-current', 'true');
+      else b.removeAttribute('aria-current');
+    });
+    $$('#nav button').forEach(function (b) {
       var on = b.dataset.v === current;
       b.classList.toggle('on', on);
       if (on) b.setAttribute('aria-current', 'page');
       else b.removeAttribute('aria-current');
     });
-    var curStage = stageOf(current);
-    if (curStage) {
-      var nav = $('#nav');
-      if (nav) nav.setAttribute('data-stage', curStage.num);
-      // 阶段标题同步到页面顶部，让用户始终知道自己在哪一阶段
-      var stageBar = $('#stageBar');
-      if (stageBar) {
-        stageBar.textContent = curStage.num + ' · ' + curStage.name;
-        stageBar.title = curStage.desc;
-      }
-    }
     // 选中项滚入视野：横向滚动导航在移动端能露出 3-4 项，
     // 切到靠后的页面时若不滚动，用户会完全看不到自己在哪
     scrollNavToActive();
@@ -932,77 +931,100 @@
       behavior: 'smooth'
     });
   }
-  var STAGES = [
-    { id: 's1', num: 'I', name: '认知输入', desc: '先见过，知道有这么个东西' },
-    { id: 's2', num: 'II', name: '理解解析', desc: '搞懂为什么，怎么推' },
-    { id: 's3', num: 'III', name: '场景运用', desc: '用出去，在语境里活起来' },
-    { id: 's4', num: 'IV', name: '审美拓展', desc: '抵达语言的密度与余韵' }
+  /* ============================================================
+     导航：两级结构（6 个主项 + 组内子项）
+     ------------------------------------------------------------
+     为什么改：
+
+     原 15 项平铺 + 5 个「I 认知输入」式罗马数字分组标题，
+     有三个实际问题：
+       1. 分组标题不可点、只是装饰，用户记不住四个阶段的边界；
+       2. 15 个按钮里「词汇/词根词缀/音标口型/英语资料」全是学单词
+          相关，却分散在 4 个位置——查一个词根要先判断它属于哪个模块；
+       3. 发音设置/账号/数据模型这类工具与学习内容混排在同一行。
+
+     新结构按「用户任务」归组：
+       总览 / 词汇 / 听说 / 阅读 / 学习 / 工具
+     主项可点（进该组上次访问的页），组内子项显示在第二行。
+     旧 hash 全部兼容：#roots 仍直达，主项高亮由 groupOf 推导。
+     ============================================================ */
+  var NAV_GROUPS = [
+    { id: 'home', label: '总览', views: ['dash'] },
+    { id: 'vocab', label: '词汇', views: ['vocab', 'roots'] },
+    { id: 'oral', label: '听说', views: ['phoneme', 'speak', 'dailycomm'] },
+    { id: 'read', label: '阅读', views: ['read', 'poetry', 'english'] },
+    { id: 'study', label: '学习', views: ['path', 'progress', 'psych'] },
+    { id: 'tools', label: '工具', views: ['tttsettings', 'account', 'data'] }
   ];
+  var VIEW_LABEL = {
+    dash: '总览',
+    vocab: '词库学习', roots: '词根词缀',
+    phoneme: '音标口型', speak: '口语跟读', dailycomm: '日常交流',
+    read: '阅读', poetry: '诗歌名句', english: '英语资料',
+    path: '等级路径', progress: '学习记忆', psych: '心理机制',
+    tttsettings: '发音设置', account: '账号同步', data: '数据模型'
+  };
 
-  var NAV = [
-    /* ---- I 认知输入 ---- */
-    { id: 'dash', label: '总览', group: 'I 认知输入' },
-    { id: 'path', label: '等级路径', group: 'I 认知输入' },
-    { id: 'vocab', label: '词汇', group: 'I 认知输入' },
-    { id: 'english', label: '英语资料', group: 'I 认知输入' },
-
-    /* ---- II 理解解析 ---- */
-    { id: 'roots', label: '词根词缀', group: 'II 理解解析' },
-    { id: 'phoneme', label: '音标口型', group: 'II 理解解析' },
-    { id: 'psych', label: '心理机制', group: 'II 理解解析' },
-    { id: 'progress', label: '学习记忆', group: 'II 理解解析' },
-
-    /* ---- III 场景运用 ---- */
-    { id: 'speak', label: '口语', group: 'III 场景运用' },
-    { id: 'dailycomm', label: '日常交流', group: 'III 场景运用' },
-    { id: 'read', label: '阅读', group: 'III 场景运用' },
-
-    /* ---- IV 审美拓展 ---- */
-    { id: 'poetry', label: '诗歌名句', group: 'IV 审美拓展' },
-
-    /* ---- 工具与设置（不参与四阶段） ---- */
-    { id: 'tttsettings', label: '发音设置', group: '工具' },
-    { id: 'account', label: '账号同步', group: '工具' },
-    { id: 'data', label: '数据模型', group: '工具' }
-  ];
-
-  /** 供其他模块引用：当前处于第几阶段 */
-  function stageOf(viewId) {
-    var n = NAV.filter(function (x) { return x.id === viewId; })[0];
-    if (!n) return null;
-    var g = n.group;
-    for (var i = 0; i < STAGES.length; i++) {
-      if (g.indexOf(STAGES[i].num) === 0) return STAGES[i];
+  /** 视图 → 所属主项 */
+  function groupOf(viewId) {
+    for (var i = 0; i < NAV_GROUPS.length; i++) {
+      if (NAV_GROUPS[i].views.indexOf(viewId) > -1) return NAV_GROUPS[i];
     }
-    return null;
+    return NAV_GROUPS[0];
+  }
+  function labelOf(viewId) {
+    return VIEW_LABEL[viewId] || viewId;
   }
 
+  /** 每个主项记住用户最后访问的子页；主项点击时回到这里而不是组首 */
+  var lastVisited = {};
 
   /**
-   * 构建导航：按阶段插入分组标题，让四阶段结构在视觉上直接可读。
-   * 不分组的话 15 个按钮平铺，用户看不出学习路径。
+   * 构建导航：第一行主项，第二行当前组的子项。
+   * 子项容器复用原 #nav——它已带滚动、渐隐与触控样式，
+   * 换新容器反而要多维护一套。
    */
   function buildNav() {
-    var nav = $('#nav');
-    var lastGroup = null;
+    var main = $('#navMain');
+    var sub = $('#nav');
 
-    NAV.forEach(function (n) {
-      if (n.group !== lastGroup) {
-        lastGroup = n.group;
-        var g = h('span', 'nav-group', n.group);
-        g.dataset.g = n.group;
-        nav.appendChild(g);
-      }
-      var b = h('button', null, n.label);
-      b.dataset.v = n.id;
-      b.setAttribute('aria-label', n.label);
-      b.onclick = function () { current = n.id; location.hash = n.id; render(); };
-      nav.appendChild(b);
+    NAV_GROUPS.forEach(function (g) {
+      var b = h('button', null, g.label);
+      b.dataset.g = g.id;
+      b.setAttribute('aria-label', g.label);
+      b.onclick = function () {
+        /* 回到该组上次访问的子页；没访问过则进组首。
+           这样「词汇 → 词根词缀 → 去听说 → 回词汇」
+           仍落在词根词缀，符合用户对「返回」的预期。 */
+        var target = lastVisited[g.id] || g.views[0];
+        current = target;
+        location.hash = target;
+        render();
+      };
+      main.appendChild(b);
     });
 
-    // 标记当前阶段，方便样式上突出
-    var cur = stageOf(current);
-    if (cur) nav.setAttribute('data-stage', cur.num);
+    renderSubNav();
+  }
+
+  /** 重建第二行：当前组的子项 */
+  function renderSubNav() {
+    var sub = $('#nav');
+    if (!sub) return;
+    ui.clear(sub);
+    var g = groupOf(current);
+    g.views.forEach(function (id) {
+      var b = h('button', null, labelOf(id));
+      b.dataset.v = id;
+      b.setAttribute('aria-label', labelOf(id));
+      b.onclick = function () {
+        current = id;
+        location.hash = id;
+        render();
+      };
+      sub.appendChild(b);
+    });
+    sub.setAttribute('data-group', g.id);
   }
 
   /* ---------- 全局错误边界 ----------

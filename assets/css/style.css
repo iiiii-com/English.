@@ -250,10 +250,56 @@ a { color: var(--primary); text-decoration: none; }
   font-size: var(--fs-md); letter-spacing: .02em;
 }
 
+/* ---------------- 两级导航 ----------------
+   第一行 .nav-main：6 个主项（总览/词汇/听说/阅读/学习/工具）。
+   第二行 .nav：当前组的子项，由 app.js 动态填充。
+
+   层级区分靠字号与字重，不靠颜色对撞——
+   主项稍大稍实，子项稍小稍轻，视线自然先落在主项上。 */
+.nav-main-rail {
+  border-top: 1px solid var(--border);
+}
+.nav-main {
+  display: flex; gap: var(--sp-1);
+  max-width: var(--maxw); margin: 0 auto; padding: var(--sp-2) 22px 0;
+  min-width: 0;
+  overflow-x: auto; overflow-y: hidden;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+.nav-main::-webkit-scrollbar { display: none; }
+.nav-main button {
+  position: relative;
+  padding: 8px 14px 10px;
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+  color: var(--text-2);
+  font-size: var(--fs-base); font-weight: 600;
+  white-space: nowrap; flex-shrink: 0;
+  transition: background-color var(--dur) var(--ease), color var(--dur) var(--ease);
+}
+.nav-main button:hover { color: var(--text); }
+.nav-main button.on { color: var(--primary-ink); }
+.nav-main button.on::after {
+  content: '';
+  position: absolute; left: 10px; right: 10px; bottom: 0;
+  height: 3px; border-radius: 3px 3px 0 0;
+  background: var(--primary);
+}
+/* 窄屏：主项 6 个必须一行放下（390px 视口实测 412px 超出）。
+   两字词 + 三字词混排，收紧水平 padding 与字距即可，
+   不能缩字号——15px 以下是可读性红线。 */
+@media (max-width: 480px) {
+  .nav-main { gap: 0; padding-left: 10px; padding-right: 10px; }
+  .nav-main button { padding: 8px 11px 10px; font-size: var(--fs-base); letter-spacing: 0; }
+  .nav-main button.on::after { left: 8px; right: 8px; }
+  .nav { padding-left: 10px; padding-right: 10px; }
+}
+
 /* 导航独立成行 */
 .nav-rail {
   position: relative;
-  border-top: 1px solid transparent;
+  border-top: 1px solid var(--border);
+  background: var(--surface-2);
   /* 两侧渐隐：告诉用户这里能横向滚动。
      用 mask 而非伪元素渐变，这样滚动时内容会自然「没入」边缘而不是被硬切。*/
   -webkit-mask-image: linear-gradient(to right, transparent 0, #000 20px, #000 calc(100% - 20px), transparent 100%);
@@ -261,7 +307,7 @@ a { color: var(--primary); text-decoration: none; }
 }
 .nav {
   display: flex; gap: 2px;
-  max-width: var(--maxw); margin: 0 auto; padding: 6px 22px 8px;
+  max-width: var(--maxw); margin: 0 auto; padding: 5px 22px 7px;
   /* min-width:0 是关键——flex 子项默认 min-width:auto，
      会被内容撑开导致 overflow-x:auto 永远不触发 */
   min-width: 0; flex: 1 1 auto;
@@ -274,17 +320,10 @@ a { color: var(--primary); text-decoration: none; }
   overscroll-behavior-x: contain;
 }
 
-/* ---------------- 宽屏导航：换行而非横向滚动 ----------------
-   实测 15 个导航项在 1440px 下占约 1560px——放不下。
-   原先的做法是 1280px 以上取消两侧渐隐、假装「放得下」，
-   结果内容被硬切：第一个按钮只剩右半边，
-   而 scrollNavToActive 又会把激活项滚到中间，于是首项永久消失。
-
-   宽屏真正的做法是允许换行：
-     - 全部导航项一次可见，不需要横向滚动
-     - 不再有「哪个按钮被切掉」的隐藏成本
-     - 页面高度只多占一行，换来的是零发现成本 */
-@media (min-width: 1100px) {
+/* 子导航最多 4 项，任何宽度都放得下——
+   不再需要宽屏换行的特例，渐隐也只在真正溢出时有意义。
+   保留规则但收紧阈值，避免留下「写了却永远不触发」的死代码。 */
+@media (min-width: 760px) {
   .nav-rail {
     -webkit-mask-image: none; mask-image: none;
   }
@@ -295,34 +334,23 @@ a { color: var(--primary); text-decoration: none; }
     row-gap: var(--sp-1);
     justify-content: flex-start;
   }
-  /* 分组标签换行后容易孤零零落在一行，宽度收紧一点更紧凑 */
-  .nav-group { margin-left: var(--sp-2); }
-  .nav-group:first-child { margin-left: 0; }
 }
 .nav::-webkit-scrollbar { display: none; }
 .nav button {
   position: relative;
-  padding: 6px 12px; border-radius: 8px; color: var(--text-2);
+  padding: 5px 11px; border-radius: var(--radius-sm); color: var(--text-3);
   font-size: var(--fs-sm); font-weight: 500; white-space: nowrap;
   flex-shrink: 0;
   scroll-snap-align: start;
   transition: background-color var(--dur) var(--ease), color var(--dur) var(--ease);
 }
-.nav button:hover { background: var(--surface-2); color: var(--text); }
+.nav button:hover { background: var(--surface); color: var(--text); }
 .nav button.on { color: var(--primary-dark); font-weight: 600; background: transparent; }
 .nav button.on::after {
   content: '';
-  position: absolute; left: 12px; right: 12px; bottom: -1px;
+  position: absolute; left: 11px; right: 11px; bottom: -1px;
   height: 2px; border-radius: 2px;
   background: var(--primary);
-}
-
-/* 分组之间的细分隔线，让四阶段的结构在导航上直接可读 */
-.nav button[data-group] + button[data-group]:not([data-same]) { position: relative; }
-.nav button[data-group] + button[data-group]:not([data-same])::before {
-  content: '';
-  position: absolute; left: -1px; top: 50%; transform: translateY(-50%);
-  width: 1px; height: 15px; background: var(--border-strong);
 }
 
 .top-right { display: flex; align-items: center; gap: var(--sp-3); flex-shrink: 0; }
@@ -954,42 +982,10 @@ a { color: var(--primary); text-decoration: none; }
   .w-hide:hover { filter: blur(7px); }
 }
 /* ============================================================
-   四阶段学习链：导航分组 + 阶段指示
+   （四阶段分组标题与阶段指示条已随两级导航移除。
+     分组语义改由 NAV_GROUPS 承担：主项 6 个 + 组内子项，
+     「I 认知输入」这类罗马数字标题用户记不住边界，已删。）
    ============================================================ */
-
-/* 导航分组标题：让 15 个按钮的层次一眼可见 */
-/* 分组标签。导航改成横向滚动后，width:100% 会把容器撑到内容全宽
-   （实测 1040px），这里必须用 auto + flex-shrink:0 才是紧凑标签。 */
-.nav-group {
-  flex-shrink: 0;
-  display: inline-flex; align-items: center;
-  font-size: 10.5px;
-  font-weight: 600;
-  letter-spacing: .08em;
-  color: var(--text-3);
-  padding: 6px 9px;
-  margin-left: 4px;
-  border-radius: 6px;
-  background: var(--surface-2);
-  white-space: nowrap;
-  user-select: none;
-}
-.nav-group:first-child { margin-left: 0; }
-/* 工具分组用更淡的底色，和学习阶段区分开 */
-.nav-group[data-g="工具"] { background: transparent; color: var(--text-3); opacity: .75; }
-
-/* 阶段指示条：始终告诉用户自己在哪一阶段 */
-.stage-bar {
-  display: inline-flex;
-  align-items: center;
-  font-size: var(--fs-xs);
-  font-weight: 600;
-  color: var(--primary-dark);
-  background: var(--primary-soft);
-  padding: 4px 10px;
-  border-radius: 999px;
-  white-space: nowrap;
-}
 
 /* ============================================================
    词根词缀模块
@@ -1318,11 +1314,8 @@ a { color: var(--primary); text-decoration: none; }
 }
 
 /* ============================================================
-   移动端适配：阶段条隐藏，导航分组保留
    ============================================================ */
 @media (max-width: 760px) {
-  .stage-bar { display: none; }
-  .nav-group { font-size: 10px; padding: 8px 0 3px; }
   .poem-lines { font-size: var(--fs-base); line-height: 1.95; }
   .poem-words { grid-template-columns: repeat(auto-fill, minmax(135px, 1fr)); }
   .fam-note { display: none; }
@@ -1553,7 +1546,6 @@ a { color: var(--primary); text-decoration: none; }
   background: var(--primary-soft);
 }
 .nav button.on::after { display: none; }
-.nav-group { align-self: center; }
 
 /* ============================================================
    桌面端精修（≥ 1024px）
@@ -1621,8 +1613,6 @@ a { color: var(--primary); text-decoration: none; }
   .brand-mark { width: 25px; height: 25px; font-size: var(--fs-sm); border-radius: 7px; }
   .brand-text { font-size: var(--fs-md); }
 
-  /* 阶段标签在移动端价值不高（页面内已多处标注），收起以让位给导航 */
-  .stage-bar { display: none; }
   .streak-chip { padding: 4px 9px; font-size: var(--fs-sm); }
   .top-right { gap: var(--sp-2); }
 
@@ -1633,10 +1623,6 @@ a { color: var(--primary); text-decoration: none; }
     min-height: 40px;
     display: inline-flex; align-items: center;
     font-size: var(--fs-base);
-  }
-  .nav-group {
-    padding: 0 8px; min-height: 28px;
-    font-size: 10px; letter-spacing: .06em;
   }
 
   .wrap { padding: 18px 15px calc(56px + env(safe-area-inset-bottom)); }
@@ -1762,22 +1748,7 @@ a { color: var(--primary); text-decoration: none; }
     max-width: none;
     padding-left: 22px; padding-right: 22px;
   }
-  /* 宽屏把分组标签做成分隔性的文字标记，不再是占位的药丸块 */
-  .nav-group {
-    background: transparent;
-    padding: 0 10px 0 6px;
-    color: var(--text-3);
-    position: relative;
-  }
-  .nav-group::before {
-    content: '';
-    position: absolute; left: 0; top: 50%; transform: translateY(-50%);
-    width: 1px; height: 14px; background: var(--border-strong);
-  }
-  .nav-group:first-child { padding-left: 0; margin-left: 0; }
-  .nav-group:first-child::before { display: none; }
   /* 工具分组弱化到几乎不可见，避免和四阶段争夺注意力 */
-  .nav-group[data-g="工具"] { opacity: .5; }
 }
 
 /* 顶栏在宽屏下压缩第一行高度，让两行比例更协调 */
