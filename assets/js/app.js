@@ -917,6 +917,11 @@
     if (!nav) return;
     var on = nav.querySelector('button.on');
     if (!on) return;
+    /* 宽屏下导航允许换行，全部项目本来就可见。
+       此时再 scrollTo 会把整条导航横向推出去，
+       连带把首项推出视野——这正是原先 1440px 下
+       「总览」被切成半个的原因。 */
+    if (global.innerWidth >= 1100) return;
     // 已经完整可见就不动
     var nl = nav.getBoundingClientRect();
     var ol = on.getBoundingClientRect();

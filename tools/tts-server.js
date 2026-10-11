@@ -25,7 +25,8 @@
      node tts-server.js --port 8788    # 同上
 
    接口：
-     GET /tts?text=...&voice=en-US-AriaNeural&rate=+0%
+     GET /tts?text=...&voice=en-US-AriaNeural&rate=+0%&pitch=0
+           pitch 可选，单位 Hz，范围 -6 ~ +6，缺省 0（原声）。
          → audio/mpeg（命中缓存时带 X-Cache: HIT）
 
      GET /health
@@ -175,13 +176,16 @@ if (!fs.existsSync(CACHE_DIR)) {
 }
 const memCache = new Map();   // key -> Buffer
 
-function cacheKey(text, voice, rate) {
+function cacheKey(text, voice, rate, pitch) {
   /* 键里必须带上 AUDIO_FORMAT 的版本号。
      换音质后如果不改键，磁盘里旧格式的音频会继续被命中返回——
      用户会以为改动没生效，而实际上是缓存没失效。
-     用 AUDIO_FORMAT 本身当版本，改格式即自动换缓存，无需手工清目录。 */
+     用 AUDIO_FORMAT 本身当版本，改格式即自动换缓存，无需手工清目录。
+
+     pitch 同样必须在键里：音高不同就是不同的音频，
+     漏掉会让「讲解模式」拿到「跟读模式」的缓存，听起来完全不对。 */
   return crypto.createHash('sha1')
-    .update(AUDIO_FORMAT + '|' + voice + '|' + rate + '|' + text)
+    .update(AUDIO_FORMAT + '|' + voice + '|' + rate + '|' + (pitch || 0) + '|' + text)
     .digest('hex');
 }
 function cachePath(key) {
@@ -258,44 +262,9 @@ async function getTTS(voice) {
 }
 
 /* ---------- 朗读文本预处理 ----------
-   音质差有一半不是音频本身的问题，是「文本没被正确朗读」。
-   学习内容里的缩写、符号、特殊符号若原样送进 TTS，
-   会被读成字母名或干脆跳过——用户听到的是错的读音，
-   自然觉得「音质差」。
-
-   这一层只改「怎么读」，不改「读什么」：不新增信息、不丢信息。*/
-function prepText(text) {
-  let s = String(text || '');
-
-  // 撇号：' 是它/ they're 之分，’ 是所有格/复数。送进 TTS 前统一掉，
-  // 让它按上下文自己判断，而不是被原样读成一个奇怪的字符
-  s = s.replace(/[''`]/g, "'");
-
-  // 常见缩写展开。TTS 对缩写常直接念字母名，展开后才读得对
-  const ABBR = [
-    [/\bMr\./g, 'Mister'], [/\bMrs\./g, 'Missus'], [/\bMs\./g, 'Miss'],
-    [/\bDr\./g, 'Doctor'], [/\bProf\./g, 'Professor'],
-    [/\bSt\./g, 'Saint'], [/\bvs\.?\b/g, 'versus'],
-    [/\be\.g\./gi, 'for example'], [/\bi\.e\./gi, 'that is'],
-    [/\betc\./gi, 'et cetera'], [/\bapprox\./gi, 'approximately'],
-    [/\bNo\./g, 'number']
-  ];
-  for (const [re, to] of ABBR) s = s.replace(re, to);
-
-  // 符号读法：只处理确实影响朗读的，保留句号逗号（它们影响断句）
-  s = s.replace(/&/g, ' and ')
-       .replace(/%/g, ' percent ')
-       .replace(/\+/g, ' plus ')
-       .replace(/=/g, ' equals ')
-       .replace(/@/g, ' at ')
-       .replace(/\$/g, ' dollars ')
-       .replace(/~/g, ' to ');
-
-  // 归一化空白。多个空格会让某些引擎插入不必要的短停顿
-  s = s.replace(/\s+/g, ' ').trim();
-
-  return s;
-}
+   规则来自 tts-prep.js，与离线音频包共用同一份。
+   曾经两边各写一份，结果离线与在线读法不一致。*/
+const { prepText } = require('./tts-prep.js');
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
@@ -336,20 +305,55 @@ async function withRetry(fn, onFail, max) {
   throw lastErr || new Error('synthesis failed');
 }
 
-async function synthRobust(text, voice, rate) {
-  const pct = (String(rate || '+0%').match(/[+-]?\d+/) || ['0'])[0];
-  const signed = (pct[0] === '+' || pct[0] === '-') ? pct : '+' + pct;
+/* ---------- 语速与语调 ----------
+   实测结论（2026-10，用真实合成验证）：
+
+     rate  生效，且是非线性的：-15% 时长 +17%，-30% 时长 +42%。
+           所以前端做「慢速」时不要线性换算，直接透传百分比更准。
+     pitch 生效：±2Hz 不改变时长但明显改变音高，
+           可用于区分「跟读模式」与「讲解模式」。
+     volume 不生效：加上后服务端直接关闭连接（no turn.end）。
+     嵌套 prosody 不生效：<prosody><prosody> 会被拒。
+
+   这三条限制共同决定了 SSML 只能保持
+   <speak><voice><prosody rate pitch> 这一条路径。 */
+
+/** 把前端传入的语速规范化为 -90 ~ +100 之间的百分比字符串 */
+function normRate(rate) {
+  let pct = parseInt(String(rate == null ? 0 : rate).replace(/[^\d+-]/g, ''), 10);
+  if (isNaN(pct)) pct = 0;
+  if (pct > 100) pct = 100;
+  if (pct < -90) pct = -90;
+  return (pct >= 0 ? '+' : '') + pct + '%';
+}
+
+/** 语调偏移，规范化为 -6 ~ +6 Hz（超过这个范围听感会明显失真） */
+function normPitch(pitch) {
+  let hz = parseInt(String(pitch == null ? 0 : pitch).replace(/[^\d+-]/g, ''), 10);
+  if (isNaN(hz)) hz = 0;
+  if (hz > 6) hz = 6;
+  if (hz < -6) hz = -6;
+  return hz;
+}
+
+async function synthRobust(text, voice, rate, pitch) {
+  const signed = normRate(rate);
+  const hz = normPitch(pitch);
   const v = VOICES[voice] || VOICES[DEFAULT_VOICE];
   const spoken = prepText(text);
   // 丢弃该音色的缓存连接，强制下次重建
   const dropConn = () => ttsByVoice.delete(voice);
 
-  // 第 1 级：raw SSML + <prosody rate>，语速真正生效（慢速朗读依赖这个）
+  /* pitch 为 0 时不写入该属性。
+     实测写了也没坏处，但少一个属性就少一条服务端可能变化的路径。 */
+  const prosody = 'rate="' + signed + '"' + (hz ? ' pitch="' + (hz > 0 ? '+' : '') + hz + 'Hz"' : '');
+
+  // 第 1 级：raw SSML + <prosody rate pitch>
   try {
     const buf = await withRetry(async () => {
       const t = await getTTS(voice);
       const ssml = '<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="'
-        + v.lang + '"><voice name="' + voice + '"><prosody rate="' + signed + '%">'
+        + v.lang + '"><voice name="' + voice + '"><prosody ' + prosody + '>'
         + esc(spoken) + '</prosody></voice></speak>';
       const { audioStream } = await t.rawToStream(ssml);
       const chunks = [];
@@ -359,7 +363,8 @@ async function synthRobust(text, voice, rate) {
     if (buf) return buf;
   } catch (e) { /* 落到第 2 级 */ }
 
-  // 第 2 级：toStream，语速可能不生效，但至少能出声
+  /* 第 2 级：toStream，语速与语调都不生效，但至少能出声。
+     走这级说明服务端 SSML 路径变了，宁可牺牲参数也要出声。 */
   return withRetry(async () => {
     const t = await getTTS(voice);
     const { audioStream } = await t.toStream(spoken);
@@ -442,6 +447,9 @@ const server = http.createServer(async (req, res) => {
   const text = (u.searchParams.get('text') || '').trim();
   const voice = u.searchParams.get('voice') || DEFAULT_VOICE;
   const rate = u.searchParams.get('rate') || '+0%';
+  /* pitch 是可选的语调偏移（Hz）。缺省 0 = 原声，
+     与旧版客户端的请求完全一致，因此向后兼容。 */
+  const pitch = u.searchParams.get('pitch') || '0';
 
   if (!text) return json(res, 400, { ok: false, error: 'text required' }, origin);
   if (text.length > MAX_TEXT) {
@@ -451,7 +459,7 @@ const server = http.createServer(async (req, res) => {
     return json(res, 400, { ok: false, error: 'unknown voice: ' + voice }, origin);
   }
 
-  const key = cacheKey(text, voice, rate);
+  const key = cacheKey(text, voice, rate, pitch);
   const hit = cacheGet(key);
   if (hit) {
     cors(res, origin);
@@ -464,7 +472,7 @@ const server = http.createServer(async (req, res) => {
   }
 
   try {
-    const buf = await synthRobust(text, voice, rate);
+    const buf = await synthRobust(text, voice, rate, pitch);
     if (!buf || buf.length < 200) {
       return json(res, 502, { ok: false, error: 'empty audio from upstream' }, origin);
     }

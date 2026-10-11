@@ -20,6 +20,10 @@
 </head>
 <body>
 
+<!-- 跳过导航：键盘用户按一次 Tab 即可直达正文，
+     否则要逐个跳过十几个导航按钮才看得到内容 -->
+<a class="skip-link" href="#view">跳到主要内容</a>
+
 <header class="topbar">
   <div class="topbar-inner">
     <a class="brand" href="#dash" aria-label="Lumen 首页">
@@ -39,7 +43,7 @@
   </div>
 </header>
 
-<main class="wrap" id="view"></main>
+<main class="wrap" id="view" tabindex="-1"></main>
 
 <script src="assets/js/data/words.js"></script>
 <script src="assets/js/data/words-gaokao-meta.js"></script>

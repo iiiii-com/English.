@@ -161,24 +161,10 @@ async function main() {
     throw lastErr || new Error('synthesis failed');
   }
 
-  /* 调 tts-server.js 的内部算法保持一致（缩写展开等） */
-  const ABBR = [
-    [/\bMr\./g, 'Mister'], [/\bMrs\./g, 'Missus'], [/\bMs\./g, 'Miss'],
-    [/\bDr\./g, 'Doctor'], [/\bProf\./g, 'Professor'],
-    [/\bSt\./g, 'Saint'], [/\bvs\.?\b/g, 'versus'],
-    [/\be\.g\./gi, 'for example'], [/\bi\.e\./gi, 'that is'],
-    [/\betc\./gi, 'et cetera'], [/\bapprox\./gi, 'approximately'],
-    [/\bNo\./g, 'number']
-  ];
-  function prepText(text) {
-    let s = String(text || '').replace(/[''`]/g, "'");
-    for (const [re, to] of ABBR) s = s.replace(re, to);
-    s = s.replace(/&/g, ' and ').replace(/%/g, ' percent ')
-         .replace(/\+/g, ' plus ').replace(/=/g, ' equals ')
-         .replace(/@/g, ' at ').replace(/\$/g, ' dollars ')
-         .replace(/~/g, ' to ');
-    return s.replace(/\s+/g, ' ').trim();
-  }
+  /* 预处理规则来自共享模块，与在线服务保持一致。
+     曾经在这里抄过一份简化版，导致同一个词离线与在线读法不同——
+     两边规则必须只有一份。 */
+  const { prepText } = require('./tts-prep.js');
 
   const manifest = { format: AUDIO_FORMAT, voice: VOICE, levels: LEVELS, words: {}, count: 0 };
   let made = 0, skip = 0, fail = 0, bytes = 0;

@@ -322,11 +322,17 @@ function check(name, ok, detail) {
 
   console.log('\n=== 6. 响应式 ===\n');
 
-  // 顶栏与导航：站名可见 + 导航拿到足够宽度 + 能横向滚动
-  const navM = await page.evaluate(() => {
+  /* 导航在不同断点下的行为是不同的，不能用一套断言套两个场景：
+       窄屏（<1100px）15 个项目必然放不下 → 横向滚动
+       宽屏（≥1100px）改成换行 → 全部可见，不滚动
+     原来只有一条「导航可横向滚动」，在宽屏下靠「放不下」侥幸通过；
+     改成换行后它就失效了。这里按断点分别断言各自应有的行为。 */
+
+  const navD = await page.evaluate(() => {   // 当前是 1440px 宽屏
     const nav = document.getElementById('nav');
     const bt = document.querySelector('.brand-text');
     const cs = getComputedStyle(nav);
+    const rail = document.querySelector('.nav-rail');
     return {
       brand: bt ? bt.textContent.trim() : '',
       brandVisible: bt ? getComputedStyle(bt).display !== 'none' : false,
@@ -334,19 +340,35 @@ function check(name, ok, detail) {
       scrollW: nav.scrollWidth,
       minW: cs.minWidth,
       overflowX: cs.overflowX,
+      flexWrap: cs.flexWrap,
+      maskNone: getComputedStyle(rail).maskImage === 'none',
       btns: nav.querySelectorAll('button').length,
       groups: nav.querySelectorAll('.nav-group').length
     };
   });
-  check('站名为 Lumen', navM.brand === 'Lumen', navM.brand);
-  check('移动端站名可见', navM.brandVisible === true, 'brand-text display');
-  // 之前导航被挤到 165px，现在必须拿到接近全屏的宽度
-  check('导航宽度足够', navM.clientW >= 360, navM.clientW + 'px');
-  check('导航 min-width 已解绑', navM.minW === '0px', navM.minW);
-  check('导航可横向滚动', navM.overflowX === 'auto' && navM.scrollW > navM.clientW,
-    navM.scrollW + ' > ' + navM.clientW);
-  check('导航按钮与分组齐全', navM.btns === 15 && navM.groups === 5,
-    navM.btns + ' 按钮 / ' + navM.groups + ' 分组');
+  check('站名为 Lumen', navD.brand === 'Lumen', navD.brand);
+  check('桌面端站名可见', navD.brandVisible === true, 'brand-text display');
+  check('导航 min-width 已解绑', navD.minW === '0px', navD.minW);
+  check('导航按钮与分组齐全', navD.btns === 15 && navD.groups === 5,
+    navD.btns + ' 按钮 / ' + navD.groups + ' 分组');
+  // 宽屏换行：全部项目一次可见，不该再有横向滚动
+  check('宽屏导航换行显示（全部可见，无需滚动）',
+    navD.flexWrap === 'wrap' && navD.scrollW <= navD.clientW + 2,
+    navD.scrollW + ' ≤ ' + navD.clientW + ' (wrap=' + navD.flexWrap + ')');
+  check('宽屏取消两侧渐隐', navD.maskNone === true);
+
+  // 首项必须完整可见，不能被推出视野
+  const firstBtn = await page.evaluate(() => {
+    const nav = document.getElementById('nav');
+    const nl = nav.getBoundingClientRect();
+    const b = nav.querySelector('button');
+    const bl = b.getBoundingClientRect();
+    return { navL: nl.left, btnL: bl.left, btnR: bl.right, navR: nl.right, text: b.textContent.trim() };
+  });
+  check('导航首个按钮完整可见',
+    firstBtn.btnL >= firstBtn.navL - 2 && firstBtn.btnR <= firstBtn.navR + 2,
+    firstBtn.text + ' [' + Math.round(firstBtn.btnL) + '→' + Math.round(firstBtn.btnR)
+    + '] in [' + Math.round(firstBtn.navL) + '→' + Math.round(firstBtn.navR) + ']');
 
   // hidden 属性兜底：带 hidden 的按钮不应被 CSS 的 display 覆盖
   const hid = await page.evaluate(() => {
@@ -570,6 +592,41 @@ function check(name, ok, detail) {
   /* ---------- 7c. 移动端可达性 ---------- */
   console.log('\n=== 7c. 移动端可达性 ===\n');
 
+  /* 窄屏导航必须仍然是横向滚动。
+     宽屏改成换行是刻意的，但窄屏下 15 个项目永远放不下，
+     换行会把顶栏撑到四五行高，反而更糟。 */
+  const pNav = await browser.newPage();
+  await pNav.setViewportSize({ width: 390, height: 844 });
+  await pNav.goto(BASE, { waitUntil: 'domcontentloaded' });
+  await pNav.waitForTimeout(1200);
+  const navNarrow = await pNav.evaluate(() => {
+    const nav = document.getElementById('nav');
+    const cs = getComputedStyle(nav);
+    const rail = document.querySelector('.nav-rail');
+    const nl = nav.getBoundingClientRect();
+    const b = nav.querySelector('button');
+    const bl = b.getBoundingClientRect();
+    return {
+      clientW: nav.clientWidth,
+      scrollW: nav.scrollWidth,
+      overflowX: cs.overflowX,
+      flexWrap: cs.flexWrap,
+      maskOn: getComputedStyle(rail).maskImage !== 'none',
+      navL: nl.left, navR: nl.right, btnL: bl.left, btnR: bl.right,
+      hasH: rail.getBoundingClientRect().height
+    };
+  });
+  check('窄屏导航拿到的宽度足够', navNarrow.clientW >= 360, navNarrow.clientW + 'px');
+  check('窄屏导航保持横向滚动（不放不下时换行会撑爆顶栏）',
+    navNarrow.flexWrap === 'nowrap' && navNarrow.overflowX === 'auto'
+    && navNarrow.scrollW > navNarrow.clientW,
+    navNarrow.flexWrap + '/' + navNarrow.overflowX + ' '
+    + navNarrow.scrollW + '>' + navNarrow.clientW);
+  check('窄屏保留两侧渐隐（提示可横向滚动）', navNarrow.maskOn === true);
+  check('窄屏导航不换行（顶栏高度可控）',
+    navNarrow.hasH < 90, navNarrow.hasH.toFixed(0) + 'px');
+  await pNav.close();
+
   // 关键点：Node 的 server.listen(PORT) 默认只绑 127.0.0.1，
   // 手机即使和电脑同一 WiFi 也连不上。必须显式绑 0.0.0.0。
   const SERVER = require('path').resolve(__dirname, '..', 'tools', 'tts-server.js');
@@ -691,6 +748,211 @@ function check(name, ok, detail) {
   // 恢复代理地址，避免影响后续测试
   await p4.evaluate(() => { window.TTS.setProxy('http://127.0.0.1:8788'); });
   await p4.close();
+
+  /* ---------- 7e. 设计令牌与无障碍 ---------- */
+  console.log('\n=== 7e. 设计令牌与无障碍 ===\n');
+
+  const CSS = require('fs').readFileSync(
+    require('path').resolve(__dirname, '..', 'assets', 'css', 'style.css'), 'utf8');
+
+  /* 对比度校验：把令牌值算出来，而不是相信注释里写的「已通过」。 */
+  function lum(hex) {
+    const m = hex.replace('#', '').match(/../g).map(h => {
+      let c = parseInt(h, 16) / 255;
+      c = c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+      return c;
+    });
+    return 0.2126 * m[0] + 0.7152 * m[1] + 0.0722 * m[2];
+  }
+  function ratio(a, b) {
+    const l1 = lum(a), l2 = lum(b);
+    return (Math.max(l1, l2) + 0.05) / (Math.min(l1, l2) + 0.05);
+  }
+  function tok(name) {
+    const m = CSS.match(new RegExp('--' + name + ':\\s*(#[0-9a-fA-F]{6})'));
+    return m ? m[1] : null;
+  }
+
+  const W = tok('on-primary') || '#ffffff';
+  const SURF = tok('surface') || '#ffffff';
+  const BG = tok('bg') || '#f6f7f9';
+
+  /* 弱化文字必须同时在白色卡片与灰色底上达标——
+     只按白色校验会漏掉 4.25 这种在页面底色上不达标的值。 */
+  const contrastPairs = [
+    ['正文 text / 卡片', tok('text'), SURF],
+    ['正文 text / 页面底', tok('text'), BG],
+    ['次要 text-2 / 卡片', tok('text-2'), SURF],
+    ['弱化 text-3 / 卡片', tok('text-3'), SURF],
+    ['弱化 text-3 / 页面底', tok('text-3'), BG],
+    ['链接 primary / 卡片', tok('primary'), SURF],
+    ['白字 / primary', W, tok('primary')],
+    ['白字 / success', W, tok('success')],
+    ['白字 / danger', W, tok('danger')],
+    ['ink / primary-soft', tok('primary-ink'), tok('primary-soft')],
+    ['ink / success-soft', tok('success-ink'), tok('success-soft')],
+    ['ink / warn-soft', tok('warn-ink'), tok('warn-soft')],
+    ['ink / danger-soft', tok('danger-ink'), tok('danger-soft')]
+  ];
+  const badContrast = [];
+  contrastPairs.forEach(([name, fg, bg]) => {
+    if (!fg || !bg) { badContrast.push(name + '(令牌缺失)'); return; }
+    const r = ratio(fg, bg);
+    if (r < 4.5) badContrast.push(name + '=' + r.toFixed(2));
+  });
+  check('全部前景/背景组合通过 WCAG AA (4.5:1)',
+    badContrast.length === 0, badContrast.join(' '));
+
+  /* 自引用变量：--x: var(--x) 会让整组色值静默失效 */
+  const selfRefs = [];
+  const reSelf = /(--[\w-]+):\s*var\((--[\w-]+)\)/g;
+  let mS;
+  while ((mS = reSelf.exec(CSS))) {
+    if (mS[1] === mS[2]) selfRefs.push(mS[1]);
+  }
+  check('没有自引用变量（--x: var(--x) 会静默失效）',
+    selfRefs.length === 0, selfRefs.join(' '));
+
+  /* 未定义变量：引用了但没定义，浏览器会丢弃整条声明 */
+  const defined = new Set();
+  const reDef = /(--[\w-]+)\s*:/g;
+  let mD;
+  while ((mD = reDef.exec(CSS))) defined.add(mD[1]);
+  const used = new Set();
+  const reUse = /var\((--[\w-]+)/g;
+  let mU;
+  while ((mU = reUse.exec(CSS))) used.add(mU[1]);
+  const undef = [...used].filter(v => !defined.has(v));
+  check('没有未定义变量', undef.length === 0, undef.join(' '));
+
+  /* 组件层不该再有硬编码色值（:root 之外） */
+  const bodyCss = CSS.slice(CSS.indexOf('\n}', CSS.indexOf(':root {')));
+  const hardColors = {};
+  const reHard = /#[0-9a-fA-F]{3,8}\b/g;
+  let mH;
+  while ((mH = reHard.exec(bodyCss))) {
+    if (!['#000', '#fff', '#ffffff', '#000000'].includes(mH[0])) {
+      hardColors[mH[0]] = (hardColors[mH[0]] || 0) + 1;
+    }
+  }
+  check('组件层无硬编码色值', Object.keys(hardColors).length === 0,
+    Object.entries(hardColors).map(([c, n]) => c + '×' + n).join(' '));
+
+  /* 字体统一：不允许组件里直接写 Georgia */
+  check('字体统一走令牌（无硬编码 Georgia）',
+    !/font-family:\s*['"]Georgia/.test(CSS),
+    (CSS.match(/font-family:\s*['"]Georgia/g) || []).length + ' 处残留');
+
+  /* 动效规范 */
+  const allTransition = (CSS.match(/transition:\s*all/g) || []).length;
+  check('无 transition: all（含 width/height 会触发重排）',
+    allTransition === 0, allTransition + ' 处');
+  check('支持 prefers-reduced-motion',
+    /@media \(prefers-reduced-motion: reduce\)/.test(CSS));
+  check('尊重 prefers-contrast: more',
+    /@media \(prefers-contrast: more\)/.test(CSS));
+
+  /* 触控目标：移动端不小于 44px */
+  check('移动端触控目标 ≥44px', /--touch:\s*44px/.test(CSS));
+  check('提供跳过导航链接', /\.skip-link/.test(CSS));
+  const html = require('fs').readFileSync(
+    require('path').resolve(__dirname, '..', 'index.html'), 'utf8');
+  check('页面已接入跳过导航', /class="skip-link"/.test(html));
+  check('主内容区可接收焦点', /id="view"[^>]*tabindex="-1"/.test(html));
+
+  /* ---------- 7f. 发音质量 ---------- */
+  console.log('\n=== 7f. 发音质量（文本预处理） ===\n');
+
+  const prep = require(require('path').resolve(__dirname, '..', 'tools', 'tts-prep.js'));
+  /* 用 RegExp 构造而不是 /.../ 字面量：
+     'kilometers per hour' 这类含斜杠的正则写成字面量会被 / 提前截断。 */
+  function R(src) { return new RegExp(src); }
+  const cases = [
+    ['千分位数字不再逐字符拼读', '约需 4,200 小时',
+      R('four thousand two hundred'), R('four comma')],
+    ['百分号读作 percent', '正确率 70%',
+      R('seventy percent'), null],
+    ['比较符号不再丢失', '得分 ≥ 85',
+      R('at least'), null],
+    ['时刻读作 half past', '会议在 7:30',
+      R('half past seven'), R('colon')],
+    ['年份用英语习惯读法', '出版于 1995 年',
+      R('nineteen ninety-five'), R('one thousand nine hundred')],
+    ['区间读作 to', '需要 8-12 周',
+      R('eight to twelve'), R('dash')],
+    ['复合单位不被斜杠拆开', '限速 60km/h',
+      R('sixty kilometers per hour'), R('slash')],
+    ['小数逐位读', '价格 42.5',
+      R('forty-two point five'), null],
+    ['金额按整体读', '价格 $3.50',
+      R('three dollars fifty cents'), R('point')],
+    ['缩写展开', 'Prof. Smith',
+      R('Professor Smith'), null],
+    ['箭头符号', 'A → B',
+      R('A to B'), null],
+    /* 不变的句子直接给期望字符串：全等比较比正则更严格，
+       任何多余空格或符号改动都会被这条抓住。 */
+    ['普通英文句不被破坏', 'Could you walk me through the process?',
+      'Could you walk me through the process?', null],
+    ['连字符词不被拆', 'That is a well-known fact in academia.',
+      'That is a well-known fact in academia.', null],
+    ['缩写后的句号不残留', 'The report was written by Dr. Chen.',
+      'The report was written by Doctor Chen.', null]
+  ];
+
+  cases.forEach(([name, input, want, forbid]) => {
+    const out = prep.prepText(input);
+    /* 期望值可以用正则或字符串。字符串走全等比较——
+       对「不该被破坏」这类用例，全等比正则更严格也更易读。 */
+    const okWant = want instanceof RegExp ? want.test(out) : out === want;
+    const okForbid = forbid ? (forbid instanceof RegExp ? !forbid.test(out) : out !== forbid) : true;
+    check('prepText · ' + name, okWant && okForbid, out);
+  });
+
+  /* 服务端必须使用共享规则，不能再各写一份 */
+  const srvSrc = require('fs').readFileSync(
+    require('path').resolve(__dirname, '..', 'tools', 'tts-server.js'), 'utf8');
+  check('服务端引用共享预处理模块',
+    /require\(['"]\.\/tts-prep\.js['"]\)/.test(srvSrc));
+  const preSrc = require('fs').readFileSync(
+    require('path').resolve(__dirname, '..', 'tools', 'pregen-audio.js'), 'utf8');
+  check('离线包生成器引用同一模块（两条路径读法一致）',
+    /require\(['"]\.\/tts-prep\.js['"]\)/.test(preSrc));
+
+  /* pitch 必须进缓存键，否则换语调会拿到旧音频 */
+  check('缓存键包含 pitch', /cacheKey[\s\S]{0,220}pitch/.test(srvSrc));
+  check('服务端支持 pitch 参数',
+    /searchParams\.get\(['"]pitch['"]\)/.test(srvSrc));
+  // volume 在服务端会直接关闭连接，SSML 里不能出现
+  check('SSML 不含 volume（服务端会拒绝该属性）',
+    !/prosody[^>]*volume=/.test(srvSrc));
+
+  /* pitch 端到端：不同音高必须是不同的缓存条目。
+     注意不能假设首次请求一定 MISS——磁盘缓存是持久的，
+     前面几轮测试可能已经把同一段文本合成了。 */
+  const base2 = BASE.replace(/:\d+$/, '') + ':8788';
+  if (base2.includes('8788')) {
+    /* 带随机后缀，保证这一轮是全新内容 */
+    const t2 = 'Cache probe ' + Math.random().toString(36).slice(2, 8) + ' one more time.';
+    const q = 'voice=en-US-AriaNeural&text=' + encodeURIComponent(t2) + '&rate=' + encodeURIComponent('+0%');
+    const r1 = await fetch(base2 + '/tts?' + q).catch(() => null);
+    await new Promise(r => setTimeout(r, 1200));
+    const r2 = await fetch(base2 + '/tts?' + q + '&pitch=3').catch(() => null);
+    await new Promise(r => setTimeout(r, 800));
+    const r3 = await fetch(base2 + '/tts?' + q + '&pitch=3').catch(() => null);
+    await new Promise(r => setTimeout(r, 800));
+    const r4 = await fetch(base2 + '/tts?' + q).catch(() => null);
+    const c1 = r1 && r1.headers.get('x-cache');
+    const c2 = r2 && r2.headers.get('x-cache');
+    const c3 = r3 && r3.headers.get('x-cache');
+    const c4 = r4 && r4.headers.get('x-cache');
+    check('不同音高各自缓存（第一次 MISS、第二次 HIT）',
+      c1 === 'MISS' && c2 === 'MISS' && c3 === 'HIT',
+      [c1, c2, c3].join(' → '));
+    // 关键：加了 pitch 之后，原音的缓存不能被覆盖
+    check('加音高不污染原音缓存',
+      c4 === 'HIT' && c4 !== 'MISS', c4);
+  }
 
   console.log('\n=== 8. 无 JS 异常 ===\n');
   check('无未捕获异常', errs.length === 0, errs.slice(0, 3).join(' | '));

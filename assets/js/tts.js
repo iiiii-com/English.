@@ -410,10 +410,19 @@
     if (pct < -70) pct = -70;
     var voice = (o && o.voice) || defaultProxyVoice();
 
+    /* 语调偏移（Hz）。两种用途：
+         -1~+1  微调，让同一个人在「讲解」与「跟读」两种语态间切换
+         ±2 以上 用于强调或区分角色
+       实测服务端接受 pitch 属性但拒绝 volume，后者会直接关闭连接。 */
+    var hz = Math.round(Number(o && o.pitch) || 0);
+    if (hz > 6) hz = 6;
+    if (hz < -6) hz = -6;
+
     var url = PROXY_BASE
       + '/tts?text=' + encodeURIComponent(t)
       + '&voice=' + encodeURIComponent(voice)
       + '&rate=' + encodeURIComponent((pct >= 0 ? '+' : '') + pct + '%');
+    if (hz) url += '&pitch=' + hz;
 
     stopProxy();
     try { if (synth) synth.cancel(); } catch (e) { /* 忽略 */ }
