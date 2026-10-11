@@ -49,14 +49,19 @@
      ============================================================ */
   function browseView(root) {
     var note = h('div', 'card');
-    note.style.cssText = 'background:linear-gradient(140deg,#f0f5ff,#fff 60%)';
+    /* 走令牌而非硬编码色值：#f0f5ff 是上一轮废弃的配色，
+       且与卡片白底对比仅 1.03，属于「看起来有、实际读不出」的颜色。 */
+    note.style.cssText = 'background:linear-gradient(140deg, var(--primary-soft), var(--surface) 60%)';
     var nh = h('div', 'card-head');
     nh.appendChild(h('h3', null, '全库浏览'));
     nh.appendChild(h('span', 'tag l1', '全部开放'));
     note.appendChild(nh);
     var nt = h('div');
-    nt.style.cssText = 'font-size:13px;line-height:1.85;color:var(--text-2)';
-    nt.innerHTML = '<b>全部 5449 词已开放</b>，任何等级都能随时查阅、学习、自测。' +
+    nt.style.cssText = 'font-size:var(--fs-base);line-height:1.85;color:var(--text-2)';
+    /* 词数取自 meta，不写死。加词后文案会自动跟上，
+       写死的数字会在下一次扩充词库时变成假信息。 */
+    var totalWords = (allMeta().total || 0).toLocaleString('en-US');
+    nt.innerHTML = '<b>全部 ' + totalWords + ' 词已开放</b>，任何等级都能随时查阅、学习、自测。' +
       '「等级路径」是<b>推荐的学习顺序</b>（先易后难，效率更高），不是权限限制。<br>' +
       '用法上建议：<b>查词</b>用这里的搜索；<b>系统学习</b>走「学新词」，' +
       '因为 SM-2 间隔重复对「按序、少量、高频复习」的效果最好。';
@@ -90,7 +95,19 @@
     sBox.appendChild(listBox);
     box.appendChild(sBox);
 
-    var state = { q: '', lv: 'ALL', theme: 'ALL', status: 'ALL', page: 0 };
+    var state = { q: '', lv: 'ALL', theme: 'ALL', status: 'ALL',
+                  band: 'ALL', exam: 'ALL', sort: 'DEFAULT', page: 0 };
+
+    /* 消费「四六级视图」传来的预置筛选。
+       必须在这里消费而不是在调用处改 state——
+       browseView 每次进入都重建 state，调用时改不到这一份。 */
+    var presetExam = null;
+    if (pendingBrowse && pendingBrowse.exam) {
+      state.exam = pendingBrowse.exam;
+      state.sort = 'PRIORITY';   // 按考纲进来，自然该按优先级排
+      presetExam = pendingBrowse.exam;
+      pendingBrowse = null;
+    }
     var PAGE = 120;
 
     var FILTERS = [
@@ -101,9 +118,46 @@
       },
       { k: 'status', opts: [['ALL', '全部状态'], ['new', '未学'], ['learning', '学习中'], ['mature', '已掌握']] }
     ];
+
+    /* 词频分档筛选。分档来自 ECDICT 的 frq 排名，与「等级」是
+       两个正交维度：等级=难度/阶段，词频=常用度。
+       两者都要，因为「L1 里也有低频词」「L6 里也有极高频词」。 */
+    var VF = global.VocabFreq;
+    var bandFilter = null;
+    if (VF && VF.bands.length) {
+      bandFilter = {
+        k: 'band',
+        opts: [['ALL', '全部词频']].concat(VF.bands.map(function (b) {
+          return [b.id, b.name];
+        }))
+      };
+    }
+
+    /* 考试体系筛选。四六级是「包含关系」而非难度递增，
+       独立成筛选项才能真正做到「按考纲背词」。 */
+    var examFilter = null;
+    if (VF && VF.exams().length) {
+      examFilter = {
+        k: 'exam',
+        opts: [['ALL', '全部考纲']].concat(VF.exams().map(function (e) {
+          return [e.id, e.name + ' ' + e.count];
+        }))
+      };
+    }
+
+    var sortFilter = {
+      k: 'sort',
+      opts: [['DEFAULT', '默认排序'], ['FREQ', '按词频'], ['PRIORITY', '按学习优先级']]
+    };
+
+    var ALL_FILTERS = FILTERS.concat(
+      bandFilter ? [bandFilter] : [],
+      examFilter ? [examFilter] : [],
+      [sortFilter]
+    );
     var filterBtns = {};
 
-    FILTERS.forEach(function (f) {
+    ALL_FILTERS.forEach(function (f) {
       f.opts.forEach(function (o) {
         var b = h('button', o[0] === state[f.k] ? 'on' : null, o[1]);
         b.type = 'button';
@@ -111,27 +165,42 @@
         b.onclick = function () {
           state[f.k] = o[0];
           state.page = 0;
-          ui.$$('button', filters).forEach(function (x) { x.classList.remove('on'); });
+          ui.$$('button', filters).forEach(function (x) {
+            if (x.dataset.k === f.k) x.classList.remove('on');
+          });
           b.classList.add('on');
           if (f.k === 'lv') { rebuildTheme(); }
-          // L5/L6 词库按需加载（约 415KB）
-          if (f.k === 'lv' && (o[0] === 'L5' || o[0] === 'L6')) {
-            var label = b.textContent;
-            b.disabled = true;
-            b.textContent = o[1] + ' 加载中…';
-            S.ensureLevel(o[0]).then(function () {
-              b.disabled = false;
-              b.textContent = label;
-              renderList();
-            });
-            return;
-          }
+          /* L5/L6 分片按需加载（约 415KB）。
+             选词频或考纲筛选时也要保证分片已加载——
+             否则 cet4/cet6 的词分布在 L5/L6 里，筛出来会是空的。 */
+          var needShards = (f.k === 'lv' && (o[0] === 'L5' || o[0] === 'L6'))
+            || ((f.k === 'band' || f.k === 'exam' || f.k === 'sort') && o[0] !== 'ALL'
+                && o[0] !== 'DEFAULT');
+          if (needShards) { loadShards(b, f, o); return; }
           renderList();
         };
         filterBtns[f.k + ':' + o[0]] = b;
         filters.appendChild(b);
       });
     });
+
+    /** 加载 L5/L6 分片，期间按钮显示进度 */
+    function loadShards(btn, f, o) {
+      var label = btn.textContent;
+      btn.disabled = true;
+      btn.textContent = o[1] + ' 加载中…';
+      Promise.all([S.ensureLevel('L5'), S.ensureLevel('L6')])
+        .then(function () {
+          btn.disabled = false;
+          btn.textContent = label;
+          renderList();
+        })
+        .catch(function () {
+          btn.disabled = false;
+          btn.textContent = label;
+          ui.toast('词库分片加载失败，请检查网络后重试', { type: 'error' });
+        });
+    }
 
     var themeSel = h('select', 'input');
     themeSel.style.cssText = 'max-width:190px;margin-left:12px';
@@ -156,10 +225,47 @@
 
     input.oninput = function () { state.q = input.value.trim(); state.page = 0; renderList(); };
 
+    /* 预置了考纲筛选时必须先加载分片，否则列表会是空的——
+       cet4/cet6 的词分布在 L5/L6 分片里，没加载就一条都筛不出来。
+       这是「点了按钮却什么都没发生」的典型原因。 */
+    if (presetExam) {
+      var loading = h('div');
+      loading.style.cssText = 'padding:var(--sp-3) var(--sp-4);background:var(--primary-soft);'
+        + 'border-radius:var(--radius-sm);font-size:var(--fs-base);color:var(--primary-ink);margin-bottom:var(--sp-3)';
+      loading.textContent = '正在加载「' + presetExam.toUpperCase() + '」词库…';
+      listBox.appendChild(loading);
+      Promise.all([S.ensureLevel('L5'), S.ensureLevel('L6')])
+        .then(function () {
+          ui.clear(listBox);
+          var ex = VF && VF.exam(presetExam);
+          ui.toast(ex ? ('已按「' + ex.name + '」筛选，并按高频优先排序')
+                      : ('已按「' + presetExam + '」筛选'));
+          renderList();
+        })
+        .catch(function () {
+          ui.clear(listBox);
+          ui.toast('词库加载失败，请检查网络后重试', { type: 'error' });
+          renderList();
+        });
+      return;
+    }
+
     function currentList() {
       var pool = loaded();
       if (state.lv !== 'ALL') pool = pool.filter(function (w) { return w.lv === state.lv; });
       if (state.theme !== 'ALL') pool = pool.filter(function (w) { return w.th === state.theme; });
+
+      /* 词频与考纲筛选。两者都必须遍历全池，
+         因为 cet4/cet6 词是按 L5/L6 分布的，不是某个独立集合。 */
+      if (state.band !== 'ALL' && VF) {
+        pool = pool.filter(function (w) { return VF.bandOf(w.w) === state.band; });
+      }
+      if (state.exam !== 'ALL' && VF) {
+        pool = pool.filter(function (w) {
+          return String(w.tag || '').split(/\s+/).indexOf(state.exam) > -1;
+        });
+      }
+
       if (state.status !== 'ALL') {
         pool = pool.filter(function (w) {
           var c = S.state.words[w.id];
@@ -169,6 +275,9 @@
           return true;
         });
       }
+
+      /* 搜索与显式排序互斥：用户主动搜了词，
+         意图明确是「找这个词」而非「看这个序列」，此时不该重排。 */
       if (state.q) {
         var lower = state.q.toLowerCase();
         pool = pool.filter(function (w) {
@@ -181,6 +290,22 @@
           var sb = bw === lower ? 0 : bw.indexOf(lower) === 0 ? 1 : 2;
           return sa !== sb ? sa - sb : aw.length - bw.length;
         });
+        return pool;
+      }
+
+      if (state.sort === 'FREQ' && VF) {
+        pool = pool.slice().sort(function (a, b) {
+          var fa = VF.frqOf(a), fb = VF.frqOf(b);
+          /* 无词频数据（99999）一律排最后。
+             若按数值直接升序，新词会与最高频词并列在最前，明显错误。 */
+          var ua = typeof fa !== 'number' || fa >= 99999;
+          var ub = typeof fb !== 'number' || fb >= 99999;
+          if (ua !== ub) return ua ? 1 : -1;
+          if (ua && ub) return String(a.w).localeCompare(String(b.w));
+          return fa - fb;
+        });
+      } else if (state.sort === 'PRIORITY' && VF) {
+        pool = VF.sortByPriority(pool, state.exam === 'ALL' ? null : state.exam);
       }
       return pool;
     }
@@ -191,12 +316,16 @@
 
       var total = S.vocabTotalCount();
       var info = h('div');
-      info.style.cssText = 'font-size:13px;color:var(--text-2);margin-bottom:12px';
+      info.style.cssText = 'font-size:var(--fs-base);color:var(--text-2);margin-bottom:12px';
       var loadedCount = loaded().length;
+      /* 未加载时给出可执行的指引，而不是只报一个数字。
+         注意措辞：考纲/词频筛选也需要分片，所以别把提示限定为「用等级筛选」。 */
       var tail = loadedCount < total
-        ? '（另有 ' + (total - loadedCount) + ' 词在 L5/L6 分片中，用上方等级筛选可加载）'
+        ? '（另有 ' + (total - loadedCount).toLocaleString('en-US')
+          + ' 词在分片中未加载，选「等级」「考纲」或「词频」筛选项会自动加载）'
         : '';
-      info.textContent = '当前显示 ' + list.length + ' 个词 · 全库共 ' + total + ' 词' + tail;
+      info.textContent = '当前显示 ' + list.length + ' 个词 · 全库共 '
+        + total.toLocaleString('en-US') + ' 词' + tail;
       listBox.appendChild(info);
 
       if (!list.length) {
@@ -216,7 +345,10 @@
       var tbl = h('table', 'tbl stackable');
       var thead = h('thead');
       var tr = h('tr');
-      var LABELS = ['单词', '音标', '释义', '等级', '主题', '状态', ''];
+      /* 多一列「词频」：这是本轮新增的核心维度。
+         单独成列而不是塞进「等级」列，因为两者含义不同——
+         等级=难度阶段，词频=常用度，用户需要分别比较。 */
+      var LABELS = ['单词', '音标', '释义', '等级', '词频', '考纲', '主题', '状态', ''];
       LABELS.forEach(function (x) {
         tr.appendChild(h('th', null, x));
       });
@@ -242,7 +374,7 @@
 
         var c1 = h('td', null, w.ipa || '—');
         c1.setAttribute('data-label', LABELS[1]);
-        c1.style.cssText = 'font-family:var(--mono);font-size:12px;color:var(--primary-dark)';
+        c1.style.cssText = 'font-family:var(--mono);font-size:var(--fs-xs);color:var(--primary-dark)';
         r.appendChild(c1);
 
         var c2 = h('td', null, w.cn || '—');
@@ -251,22 +383,55 @@
 
         var c3 = h('td', null, w.lv);
         c3.setAttribute('data-label', LABELS[3]);
-        c3.style.cssText = 'font-size:11.5px;font-weight:700;color:' +
-          (w.lv === 'L1' ? '#22b07d' : w.lv === 'L2' ? '#4f7cff' : w.lv === 'L3' ? '#f0a020' :
-            w.lv === 'L4' ? '#e2585f' : w.lv === 'L5' ? '#8b5cf6' : '#ec4899');
+        /* 等级色走令牌，不再硬编码。
+           旧写法用的还是上一轮废弃的配色（对比度 2.15~3.71，不达标）。 */
+        c3.style.cssText = 'font-size:var(--fs-xs);font-weight:700;color:var(--lv-' +
+          String(w.lv || '').toLowerCase() + ', var(--text-2))';
         r.appendChild(c3);
 
+        /* 词频档位：带标签，鼠标悬停说明该档含义 */
+        var cF = h('td');
+        cF.setAttribute('data-label', LABELS[4]);
+        if (VF) {
+          var bid = VF.bandOf(w.w);
+          var bi = VF.bandInfo(bid);
+          var bt = h('span', 'tag ' + VF.bandTag(bid), bi ? bi.name : bid);
+          bt.title = bi ? bi.desc : '';
+          cF.appendChild(bt);
+        }
+        r.appendChild(cF);
+
+        /* 考纲标签：只显示主要体系，全部标签会挤爆单元格 */
+        var cE = h('td');
+        cE.setAttribute('data-label', LABELS[5]);
+        if (VF) {
+          var es = VF.examsOfWord(w).slice(0, 2);
+          es.forEach(function (e) {
+            var et = h('span', 'tag grey', e.name);
+            et.style.marginRight = '3px';
+            et.title = e.full;
+            cE.appendChild(et);
+          });
+          var all = VF.examsOfWord(w);
+          if (all.length > 2) {
+            var more = h('span', 'tag grey', '+' + (all.length - 2));
+            more.title = all.slice(2).map(function (e) { return e.name; }).join(' ');
+            cE.appendChild(more);
+          }
+        }
+        r.appendChild(cE);
+
         var c4 = h('td', null, w.th || '—');
-        c4.setAttribute('data-label', LABELS[4]);
-        c4.style.cssText = 'font-size:11.5px;color:var(--text-3);max-width:130px';
+        c4.setAttribute('data-label', LABELS[6]);
+        c4.style.cssText = 'font-size:var(--fs-xs);color:var(--text-3);max-width:130px';
         r.appendChild(c4);
 
         var c5 = h('td');
-        c5.setAttribute('data-label', LABELS[5]);
+        c5.setAttribute('data-label', LABELS[7]);
         var card = S.state.words[w.id];
         var tag = h('span', null, card ? (card.ivl >= 21 ? '已掌握' : '学习中') : '未学');
-        tag.style.cssText = 'font-size:11px;font-weight:700;color:' +
-          (!card ? 'var(--text-3)' : card.ivl >= 21 ? '#17805a' : '#b8790f');
+        tag.style.cssText = 'font-size:var(--fs-xs);font-weight:700;color:' +
+          (!card ? 'var(--text-3)' : card.ivl >= 21 ? 'var(--success-ink)' : 'var(--warn-ink)');
         c5.appendChild(tag);
         r.appendChild(c5);
 
@@ -1306,10 +1471,216 @@
   /* ============================================================
      组装
      ============================================================ */
+  /* ============================================================
+     四六级 —— 按考纲组织词表
+     ------------------------------------------------------------
+     为什么单独做一个视图，而不是只在筛选栏加两个选项：
+
+     筛选栏解决的是「我要找某个词」，而四六级真正要回答的问题是
+     「这个考试要背哪些词、先背哪些」。前者是一次查询，
+     后者是长期学习计划，信息密度完全不同。
+
+     并且要如实告诉用户一个反直觉的事实：四级考纲并非六级考纲的
+     等比缩小版——实测四级 2052 词里有 1802 词六级也要，
+     真正只属于四级的只有 250 词。
+     「背完四级再背六级」的线性预期会误导学习者，
+     让他们以为六级只是四级的加法。
+     ============================================================ */
+  function cetView(root) {
+    var VFm = global.VocabFreq;
+    var box = h('div');
+    root.appendChild(box);
+
+    if (!VFm || !VFm.exams().length) {
+      var e = h('div', 'empty-state');
+      e.appendChild(h('div', 'e-ico', '📊'));
+      e.appendChild(h('div', 'e-txt', '词频索引未加载。执行 node tools/build-freq-index.js 生成。'));
+      box.appendChild(e);
+      return;
+    }
+
+    /* ---- 概览：各考纲规模 ---- */
+    var ov = h('div', 'card');
+    var oh = h('div', 'card-head');
+    oh.appendChild(h('h3', null, '考纲总览'));
+    oh.appendChild(h('span', 'tag blue', '按使用频率分层'));
+    ov.appendChild(oh);
+
+    /* 用既有的 .grid.g4——项目里没有 .stat-grid 这个类，
+       写成不存在的类名会让卡片退化成块级竖排。 */
+    var og = h('div', 'grid g4');
+    VFm.exams().forEach(function (e2) {
+      var c = h('div', 'stat');
+      c.appendChild(h('div', 'lbl', e2.name));
+      var v = h('div', 'val', String(e2.count));
+      var s = h('small', null, '词');
+      v.appendChild(s);
+      c.appendChild(v);
+      /* 独占词才是「这个考试特有」的部分。
+         对考研/托福这类已被别的考纲覆盖大半的体系，独占数很小，
+         这是真实情况，不该用「核心词」这类说法把它包装得很大。 */
+      c.appendChild(h('div', 'delta', '本考纲独有 ' + e2.exclusive + ' 词'));
+      og.appendChild(c);
+    });
+    ov.appendChild(og);
+    box.appendChild(ov);
+
+    /* ---- 四六级关系：把反直觉的事实讲清楚 ---- */
+    var ins = VFm.cetInsight();
+    if (ins) {
+      var ic = h('div', 'card');
+      var ih = h('div', 'card-head');
+      ih.appendChild(h('h3', null, '四级与六级的关系'));
+      var ig = h('span', 'tag l3', '必读');
+      ih.appendChild(ig);
+      ic.appendChild(ih);
+
+      var ib = h('div');
+      ib.style.cssText = 'font-size:var(--fs-base);line-height:1.85;color:var(--text-2)';
+      ib.innerHTML = '常见的误解是「四级是六级的缩小版，背完四级接着背六级就行」。'
+        + '实测数据不支持这个预期：'
+        + '<div style="display:flex;gap:18px;flex-wrap:wrap;margin:12px 0">'
+        + '<div style="flex:1;min-width:180px">'
+        + '<div style="font-size:var(--fs-xs);color:var(--text-3)">四级考纲</div>'
+        + '<div style="font-size:var(--fs-2xl);font-weight:750;color:var(--l2-ink)">'
+        + ins.cet4 + ' <small style="font-size:var(--fs-base);color:var(--text-3)">词</small></div>'
+        + '</div>'
+        + '<div style="flex:1;min-width:180px">'
+        + '<div style="font-size:var(--fs-xs);color:var(--text-3)">其中六级也要</div>'
+        + '<div style="font-size:var(--fs-2xl);font-weight:750;color:var(--text-2)">'
+        + ins.both + ' <small style="font-size:var(--fs-base);color:var(--text-3)">词（'
+        + ins.overlapPct + '%）</small></div>'
+        + '</div>'
+        + '<div style="flex:1;min-width:180px">'
+        + '<div style="font-size:var(--fs-xs);color:var(--text-3)">四级独有</div>'
+        + '<div style="font-size:var(--fs-2xl);font-weight:750;color:var(--l2)">'
+        + ins.cet4Only + ' <small style="font-size:var(--fs-base);color:var(--text-3)">词</small></div>'
+        + '</div>'
+        + '<div style="flex:1;min-width:180px">'
+        + '<div style="font-size:var(--fs-xs);color:var(--text-3)">六级独有</div>'
+        + '<div style="font-size:var(--fs-2xl);font-weight:750;color:var(--l5)">'
+        + ins.cet6Only + ' <small style="font-size:var(--fs-base);color:var(--text-3)">词</small></div>'
+        + '</div>'
+        + '</div>'
+        + '<b>结论</b>：六级真正的增量是那 <b>' + ins.cet6Only + ' 词</b>，'
+        + '而不是把四级再背一遍。备考六级时，四级已覆盖的 '
+        + ins.both + ' 词只需维持复习，把精力放在独有词上更高效。'
+        + '<br><br>所以下面默认按<b>「考试内 + 高频优先」</b>排序——'
+        + '这是真正决定背诵顺序的规则。';
+      ic.appendChild(ib);
+      box.appendChild(ic);
+    }
+
+    /* ---- 考纲详情：选一个体系看它的词频分层 ---- */
+    var sel = h('div', 'card');
+    var sh = h('div', 'card-head');
+    sh.appendChild(h('h3', null, '按考纲查看'));
+    sel.appendChild(sh);
+
+    var seg = h('div', 'segment');
+    seg.style.marginBottom = 'var(--sp-4)';
+    sel.appendChild(seg);
+
+    var detail = h('div');
+    sel.appendChild(detail);
+    box.appendChild(sel);
+
+    var cur = 'cet4';
+    seg.id = 'cetSeg';
+    VFm.exams().forEach(function (e2) {
+      var b = h('button', e2.id === cur ? 'on' : null, e2.name);
+      b.type = 'button';
+      b.dataset.e = e2.id;
+      b.onclick = function () {
+        cur = e2.id;
+        $$('button', seg).forEach(function (x) { x.classList.toggle('on', x.dataset.e === cur); });
+        renderDetail();
+      };
+      seg.appendChild(b);
+    });
+
+    function renderDetail() {
+      ui.clear(detail);
+      var ex = VFm.exam(cur);
+      var pr = VFm.priorityOf(cur);
+      if (!ex) return;
+
+      var info = h('div');
+      info.style.cssText = 'font-size:var(--fs-base);color:var(--text-2);margin-bottom:var(--sp-4);line-height:1.8';
+      info.textContent = ex.full + '（' + ex.name + '）共 ' + ex.count + ' 词，其中本考纲独有 '
+        + ex.exclusive + ' 词。下方按使用频率分层：';
+      detail.appendChild(info);
+
+      if (pr) {
+        var bars = h('div');
+        bars.style.cssText = 'display:flex;flex-direction:column;gap:var(--sp-2);margin-bottom:var(--sp-5)';
+        /* 只画有词的四档。F5「无数据」占一大块，画出来会挤掉真正有意义的分布，
+           所以单独用一行文字说明。 */
+        var rows = [
+          ['F1', '极高频', pr.core, '必须滚熟'],
+          ['F2', '高频', pr.high, '读写都要认'],
+          ['F3', '中频', pr.mid, '认识即可'],
+          ['F4', '低频', pr.low, '见过就够']
+        ];
+        var max = Math.max(pr.core, pr.high, pr.mid, pr.low, 1);
+        rows.forEach(function (rw) {
+          var line = h('div');
+          line.style.cssText = 'display:flex;align-items:center;gap:var(--sp-3)';
+          var lab = h('span', null, rw[1]);
+          lab.style.cssText = 'width:64px;font-size:var(--fs-sm);font-weight:600;flex-shrink:0';
+          line.appendChild(lab);
+          var track = h('div');
+          track.style.cssText = 'flex:1;height:10px;background:var(--surface-3);border-radius:999px;overflow:hidden';
+          var fill = h('i');
+          fill.style.cssText = 'display:block;height:100%;width:' + (rw[2] / max * 100)
+            + '%;background:var(--' + VFm.bandTag(rw[0]) + ');border-radius:999px;'
+            + 'transition:width var(--dur-slow) var(--ease-out)';
+          track.appendChild(fill);
+          line.appendChild(track);
+          var num = h('span', null, rw[2] + ' 词');
+          num.style.cssText = 'width:82px;text-align:right;font-size:var(--fs-sm);'
+            + 'font-weight:600;color:var(--text-2);flex-shrink:0';
+          line.appendChild(num);
+          var hint = h('span', null, rw[3]);
+          hint.style.cssText = 'width:76px;font-size:var(--fs-xs);color:var(--text-3);flex-shrink:0';
+          line.appendChild(hint);
+          bars.appendChild(line);
+        });
+        detail.appendChild(bars);
+
+        var tail = h('div');
+        tail.style.cssText = 'font-size:var(--fs-sm);color:var(--text-3);margin-bottom:var(--sp-4)';
+        tail.textContent = '另有 ' + pr.low + ' 词属于低频或无词频记录，按需查阅即可。';
+        detail.appendChild(tail);
+      }
+
+      var go = h('button', 'btn', '在「全库浏览」中打开该考纲的词表');
+      go.type = 'button';
+      go.onclick = function () {
+        /* 必须真的预置筛选，否则 toast 说的「筛选已设为 CET-4」就是假承诺。
+           browseView 的 state 是它的局部变量，
+           所以走 hash 传参，由 browseView 初始化时读取。 */
+        location.hash = 'vocab';
+        curTab = 'browse';
+        pendingBrowse = { exam: cur };
+        switchTab('browse');
+      };
+      detail.appendChild(go);
+    }
+
+    renderDetail();
+  }
+
+  /* 四六级视图 → 全库浏览的预置筛选。
+     跨视图传参只能用模块级变量：
+     browseView 每次进入都重建自己的 state，没有对外接口可写。 */
+  var pendingBrowse = null;
+
   var TABS = [
     { id: 'review', label: '今日复习', fn: reviewView, desc: '按 SM-2 队列提取复习' },
     { id: 'new', label: '学新词', fn: newView, desc: '分等级分主题的词表' },
-    { id: 'browse', label: '全库浏览', fn: browseView, desc: '5449 词全部开放，随时查阅' },
+    { id: 'browse', label: '全库浏览', fn: browseView, desc: '全库开放，按等级/考纲/词频查阅' },
+    { id: 'cet', label: '四六级', fn: cetView, desc: '按考纲背词，看清四级与六级的真实关系' },
     { id: 'quiz', label: '自测', fn: quizView, desc: '动态生成测验' },
     { id: 'core', label: '核心词精讲', fn: coreView, desc: '高频功能词详解' }
   ];

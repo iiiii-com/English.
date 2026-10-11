@@ -954,6 +954,128 @@ function check(name, ok, detail) {
       c4 === 'HIT' && c4 !== 'MISS', c4);
   }
 
+  /* ---------- 7g. 词频分级与四六级 ---------- */
+  console.log('\n=== 7g. 词频分级与四六级 ===\n');
+
+  /* 先导航到词汇页。
+     上面 7c/7d 把共享的 page 留在了别的路由上，
+     直接查 #vocabTabs 会得到「标签不存在」的假失败。 */
+  await page.goto(BASE + '/index.html#vocab', { waitUntil: 'domcontentloaded' });
+  await page.waitForTimeout(1500);
+
+  const FREQ_JS = require('path').resolve(__dirname, '..', 'assets', 'js', 'data', 'word-frequency.js');
+  check('词频索引文件已生成', require('fs').existsSync(FREQ_JS));
+  const FREQ_SIZE = require('fs').statSync(FREQ_JS).size;
+  check('词频索引体积合理（<60KB）', FREQ_SIZE < 60000, (FREQ_SIZE / 1024).toFixed(1) + 'KB');
+
+  const VFp = await page.evaluate(() => {
+    const VF = window.VocabFreq;
+    if (!VF) return null;
+    const ins = VF.cetInsight();
+    return {
+      bands: VF.bands.map(b => b.id + ':' + b.count),
+      // 注意 meta 是函数，要调用 VF.meta() 而不是取 VF.meta.total
+      total: VF.meta().total,
+      exams: VF.exams().map(e => e.id + ':' + e.count),
+      insight: ins,
+      // 最高频词应归 F1
+      the: VF.bandOf('the'),
+      of: VF.bandOf('of'),
+      // 大小写不敏感
+      upper: VF.bandOf('THE'),
+      // 不存在的词应落 F5 而不是报错
+      unknown: VF.bandOf('zzz-not-a-word-xyz'),
+      // cet4/cet6 的包含关系
+      cet4Has: VF.examsOfWord({ tag: 'cet4' }).map(e => e.id),
+      sortTop: VF.sortByPriority(
+        [{ w: 'rare', tag: 'cet4', frq: 8000 }, { w: 'common', tag: 'cet4', frq: 10 },
+         { w: 'other', tag: 'ky toefl', frq: 5 }],
+        'cet4').map(x => x.w)
+    };
+  });
+
+  check('词频模块已加载', !!VFp);
+  if (VFp) {
+    check('覆盖全库 5449 词', VFp.total === 5449, VFp.total + ' 词');
+    check('五个词频档位', VFp.bands.length === 5, VFp.bands.join(' '));
+    check('the/of 归入极高频 F1',
+      VFp.the === 'F1' && VFp.of === 'F1', 'the=' + VFp.the + ' of=' + VFp.of);
+    check('查词不区分大小写', VFp.upper === 'F1');
+    check('未知词落 F5 而非报错', VFp.unknown === 'F5', VFp.unknown);
+    check('考纲体系完整（8 个）', VFp.exams.length === 8, VFp.exams.join(' '));
+    check('cet4 在体系中', VFp.cet4Has.indexOf('cet4') > -1, VFp.cet4Has.join(','));
+
+    /* 四六级是包含关系而非难度递增，这是本轮最该被守住的认知 */
+    const ins = VFp.insight;
+    check('四六级为包含关系（共有词 > 六级独有）',
+      ins && ins.both > ins.cet6Only,
+      ins ? ('共有 ' + ins.both + ' > 六级独有 ' + ins.cet6Only) : '无数据');
+    check('四六级共享率 ≥85%',
+      ins && ins.overlapPct >= 85,
+      ins ? ins.overlapPct + '%' : '无数据');
+
+    /* 排序：考试内优先，其次高频 */
+    check('学习优先级 = 考试内优先 + 高频优先',
+      VFp.sortTop[0] === 'common' && VFp.sortTop[1] === 'rare' && VFp.sortTop[2] === 'other',
+      VFp.sortTop.join(' → '));
+  }
+
+  // UI 层：四六级标签页与筛选器存在
+  const cetUI = await page.evaluate(() => {
+    const tabs = [...document.querySelectorAll('#vocabTabs button')].map(b => b.textContent.trim());
+    return {
+      hasCet: tabs.indexOf('四六级') > -1,
+      hasVF: !!window.VocabFreq
+    };
+  });
+  check('词汇页新增「四六级」标签', cetUI.hasCet);
+
+  const cetBtn = await page.$('#vocabTabs button[data-t="cet"]');
+  if (cetBtn) {
+    await cetBtn.click();
+    await page.waitForTimeout(900);
+    const cetPage = await page.evaluate(() => ({
+      cards: document.querySelectorAll('#vocabBody .stat').length,
+      examBtns: document.querySelectorAll('#cetSeg button').length,
+      // 考纲卡必须用 grid g4，否则会退化成竖排
+      gridCls: (document.querySelector('#vocabBody .grid') || {}).className || '',
+      hasInsight: /四级独有/.test(document.body.innerText)
+    }));
+    check('四六级页展示全部考纲', cetPage.cards === 8, cetPage.cards + ' 张卡');
+    check('考纲切换按钮齐全', cetPage.examBtns === 8, cetPage.examBtns + ' 个');
+    check('考纲卡使用 grid 布局（避免竖排）',
+      /grid/.test(cetPage.gridCls), cetPage.gridCls);
+    check('已展示四六级关系洞察', cetPage.hasInsight);
+
+    /* 从四六级页跳到浏览页：筛选必须真的预置上，
+       否则就是「toast 说筛了、实际没筛」的假承诺。 */
+    const goBtn = await page.evaluateHandle(() => {
+      return [...document.querySelectorAll('#vocabBody button')]
+        .find(b => /全库浏览/.test(b.textContent));
+    });
+    const goEl = goBtn.asElement();
+    if (goEl) {
+      await goEl.click();
+      await page.waitForTimeout(3500);
+      const after = await page.evaluate(() => {
+        const on = [...document.querySelectorAll('button.on')].map(b => b.dataset.k + '=' + b.dataset.v);
+        return {
+          on: on,
+          rows: document.querySelectorAll('.tbl tbody tr').length,
+          examTags: [...document.querySelectorAll('.tbl tbody tr td:nth-child(6) .tag')]
+            .slice(0, 5).map(t => t.textContent.trim())
+        };
+      });
+      check('跳转后考纲筛选真的生效',
+        after.on.indexOf('exam=cet4') > -1, after.on.join(' '));
+      check('跳转后按优先级排序',
+        after.on.indexOf('sort=PRIORITY') > -1, after.on.join(' '));
+      check('跳转后列表非空', after.rows > 0, after.rows + ' 行');
+      check('列表行的考纲标签与筛选一致',
+        after.examTags.some(t => /CET-4/.test(t)), after.examTags.join(',') || '(空)');
+    }
+  }
+
   console.log('\n=== 8. 无 JS 异常 ===\n');
   check('无未捕获异常', errs.length === 0, errs.slice(0, 3).join(' | '));
 
