@@ -16,86 +16,90 @@
    ============================================================ */
 
 :root {
-  /* ---------- 色彩：中性层 ----------
-     背景到前景共 5 级，级差固定，页面纵向节奏因此稳定。 */
-  --bg: #f6f7f9;
-  --surface: #ffffff;
-  --surface-2: #fafbfc;
-  --surface-3: #f2f4f7;
-  --border: #e4e8ee;
-  --border-strong: #cdd3dd;
+  /* ---------- 色彩：中性层（纸墨） ----------
+     2026-10 视觉重设计：从冷灰 SaaS 风转向暖纸底 + 墨色。
+     依据：本站内容是诗歌、词源、名句——人文调性的内容
+     配标准 SaaS 蓝紫，气质是脱节的。纸墨让界面退后，
+     让内容（衬线词标、诗行、例句）成为主角。
+     全部组合先经 tools/_tmp-palette.cjs 验证 ≥4.5:1 再入档。 */
+  --bg: #f7f4ee;
+  --surface: #fffdf8;
+  --surface-2: #faf7f1;
+  --surface-3: #efebe2;
+  --border: #e5dfd3;
+  --border-strong: #d4ccbd;
 
-  /* 文字三级：正文 / 次要 / 弱化。
-     三者对比度分别 15.4 / 6.3 / 4.8，全部通过 WCAG AA。
-     弱化文字常被拿来做「补充说明」，一旦低于 4.5 就是不可读。
-     注意 --text-3 必须同时在 --surface(白) 与 --bg(灰) 上达标，
-     只按白色校验会漏掉 4.25 这种在页面底色上不达标的值。 */
-  --text: #1a1f2b;
-  --text-2: #545c6e;
-  --text-3: #676e7c;
+  /* 文字三级：正文 / 次要 / 弱化（墨色）。
+     对比度 16.5 / 7.3 / 5.3，在页面底色上 5.0——
+     弱墨也必须同时在卡面与页面底上达标。 */
+  --text: #201d18;
+  --text-2: #5a554a;
+  --text-3: #6f6a5e;
 
   /* ---------- 色彩：强调与语义 ----------
      每个语义色成对定义：
        -xxx  前景色（用于文字/图标，必须达 4.5:1）
        -xxx-soft 背景色（用于底纹，与前景成对使用）
      背景块上的文字若直接用 -xxx 实测不达标，所以另给 -xxx-ink，
-     它是同色系更深的版本，专门用于 soft 底上的文字。 */
-  --primary: #466ee3;
-  --primary-hover: #3a5fce;
-  --primary-soft: #edf1fe;
-  --primary-ink: #2f4fa8;
+     它是同色系更深的版本，专门用于 soft 底上的文字。
+     主强调选墨蓝而非蓝紫：保留「链接是蓝的」这一网络惯例，
+     但降饱和加墨感，与暖纸底同频。 */
+  --primary: #3a5aa8;
+  --primary-hover: #30509c;
+  --primary-soft: #e8edf7;
+  --primary-ink: #2c4682;
   /* 兼容旧名：组件里大量用它表示「primary 底上的文字」，
      语义上等同于 --primary-ink，保留别名避免大面积改动出错。 */
   --primary-dark: var(--primary-ink);
 
-  --success: #1a865f;
-  --success-soft: #e7f5ef;
-  --success-ink: #146549;
+  --success: #237a56;
+  --success-soft: #e6f2ec;
+  --success-ink: #175c41;
 
-  --warn: #a16b15;
-  --warn-soft: #fdf3e2;
-  --warn-ink: #7d520d;
+  --warn: #8a6113;
+  --warn-soft: #f7efdd;
+  --warn-ink: #7a5310;
 
-  --danger: #c74d54;
-  --danger-soft: #fceded;
-  --danger-ink: #a13a41;
+  --danger: #bb4a46;
+  --danger-soft: #f9e9e6;
+  --danger-ink: #95382f;
 
   /* 等级色：仅用于色块/标签的底色，不承担正文文字职责 */
-  --l1: #1a865f;
-  --l2: #466ee3;
-  --l3: #a16b15;
-  --l4: #c74d54;
-  --l5: #6d4bc4;
-  --l6: #b4407f;
+  --l1: #237a56;
+  --l2: #3a5aa8;
+  --l3: #8a6113;
+  --l4: #bb4a46;
+  --l5: #64459e;
+  --l6: #a03d70;
 
   /* 等级对应的前景色。
      供 JS 侧按等级取色用（列表里的等级文字）：
      CSS 变量能用在 JS 里，但只有写在 :root 的才能被 var() 取到，
      所以这里显式列出 --lv-l1..--lv-l6。 */
-  --lv-l1: #1a865f;
-  --lv-l2: #466ee3;
-  --lv-l3: #a16b15;
-  --lv-l4: #c74d54;
-  --lv-l5: #6d4bc4;
-  --lv-l6: #b4407f;
+  --lv-l1: #237a56;
+  --lv-l2: #3a5aa8;
+  --lv-l3: #8a6113;
+  --lv-l4: #bb4a46;
+  --lv-l5: #64459e;
+  --lv-l6: #a03d70;
 
   /* 每个等级色配一组「底色 + 底色上的文字色」。
      单独调浅底色容易配出不足 4.5:1 的组合，
      所以把成对的两个值放在一起，改配色时必须一起改。 */
-  --l1-soft: #e7f5ef;  --l1-ink: #146549;
-  --l2-soft: #edf1fe;  --l2-ink: #2f4fa8;
-  --l3-soft: #fdf3e2;  --l3-ink: #7d520d;
-  --l4-soft: #fceded;  --l4-ink: #a13a41;
-  --l5-soft: #f3edfd;  --l5-ink: #4c3d84;
-  --l6-soft: #fdecf5;  --l6-ink: #96306b;
+  --l1-soft: #e6f2ec;  --l1-ink: #175c41;
+  --l2-soft: #e8edf7;  --l2-ink: #2c4682;
+  --l3-soft: #f7efdd;  --l3-ink: #7a5310;
+  --l4-soft: #f9e9e6;  --l4-ink: #95382f;
+  --l5-soft: #ede8f6;  --l5-ink: #4c3577;
+  --l6-soft: #f6e4ee;  --l6-ink: #7d2f5a;
 
   /* 品牌渐变：品牌标记的专用色，不参与其他语义。
-     保持与 --primary 同色系起点，让图标与整体色调不脱节。 */
-  --brand-grad-2: #6a52e8;
-  --brand-grad-3: #8a52e0;
+     墨蓝沉入深紫，收着用——纸墨语境里品牌不该抢戏。 */
+  --brand-grad-2: #4a3d70;
+  --brand-grad-3: #2f4a75;
 
   /* 骨架屏微光色 */
-  --skeleton-hi: #e3e6ec;
+  --skeleton-hi: #e3ddcf;
 
   /* ---------- 间距 ----------
      4px 基数的比例序列。原先全文件有 6/7/8/9/10/11/12px 七种间距值，
@@ -129,9 +133,15 @@
   --radius-sm: 8px;
   --radius: 12px;
   --radius-lg: 16px;
-  --shadow-xs: 0 1px 2px rgba(20, 28, 45, .05);
-  --shadow: 0 1px 2px rgba(20, 28, 45, .04), 0 4px 14px rgba(20, 28, 45, .05);
-  --shadow-lg: 0 8px 30px rgba(20, 28, 45, .1);
+  /* ---------- 圆角与阴影 ----------
+     只保留 3 档。圆角层级多了会让界面显得碎。
+     阴影带暖调（偏棕不偏蓝）——冷灰阴影在暖纸底上会显「脏」。 */
+  --radius-sm: 8px;
+  --radius: 12px;
+  --radius-lg: 16px;
+  --shadow-xs: 0 1px 2px rgba(74, 62, 40, .05);
+  --shadow: 0 1px 2px rgba(74, 62, 40, .04), 0 4px 14px rgba(74, 62, 40, .05);
+  --shadow-lg: 0 8px 30px rgba(74, 62, 40, .1);
 
   /* ---------- 动效 ----------
      150-300ms 是「立刻响应」与「不拖沓」的平衡点；
@@ -160,10 +170,17 @@
 
   /* 语义色的边框档：底色块需要描边才能界定边界，
      用语义色的浅色调而不是中性灰，才能保持同一套色彩语言。 */
-  --primary-border: #c5d3f7;
-  --success-border: #a8dcc6;
-  --warn-border: #f0d5a3;
-  --danger-border: #f0b8bc;
+  --primary-border: #c6d1e8;
+  --success-border: #b5d8c7;
+  --warn-border: #e5d3ab;
+  --danger-border: #ecc7c1;
+
+  /* ---------- 编辑感：标题衬线 ----------
+     页面主标题与卡片标题用衬线体，正文保持无衬线。
+     这是「纸墨」方向里投入产出比最高的一步：
+     不动布局，只换标题字形，编辑感立刻出来。
+     衬线只给标题——正文无衬线的可读性在学习场景不可让步。 */
+  --font-title: var(--font-serif);
 }
 
 /* 桌面端整体放大一档：15px 正文在 1220px 容器上偏小 */
@@ -223,7 +240,7 @@ a { color: var(--primary); text-decoration: none; }
    所以把导航抽成独立的 .nav-rail 一整行，让它拿到全部视口宽度。 */
 .topbar {
   position: sticky; top: 0; z-index: 100;
-  background: rgba(255, 255, 255, .86);
+  background: rgba(255, 253, 248, .88);
   backdrop-filter: saturate(180%) blur(16px);
   -webkit-backdrop-filter: saturate(180%) blur(16px);
   border-bottom: 1px solid var(--border);
@@ -242,7 +259,8 @@ a { color: var(--primary); text-decoration: none; }
   background: linear-gradient(140deg, var(--primary), var(--brand-grad-2) 55%, var(--brand-grad-3));
   display: grid; place-items: center; color: var(--on-primary);
   font-size: var(--fs-base); font-weight: 700; letter-spacing: 0;
-  box-shadow: 0 2px 8px rgba(79, 124, 255, .3);
+  /* 阴影跟随品牌色而不是写死的旧蓝紫 */
+  box-shadow: 0 2px 8px rgba(47, 74, 117, .28);
 }
 .brand-text {
   /* 字标用衬线体，与正文的无衬线形成层级差，也更贴近「拉丁词源」的调性 */
@@ -399,7 +417,13 @@ a { color: var(--primary); text-decoration: none; }
 @keyframes fade { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
 
 .page-head { margin-bottom: 20px; }
-.page-head h1 { font-size: var(--fs-2xl); margin: 0 0 5px; letter-spacing: -.02em; font-weight: 700; }
+.page-head h1 {
+  font-size: var(--fs-2xl); margin: 0 0 5px; letter-spacing: -.02em; font-weight: 700;
+  /* 页面主标题用衬线——纸墨方向的核心手势。
+     标题短、字号大，衬线的装饰性在这里是气质而非负担；
+     正文绝不用衬线，学习场景的可读性不可让步。 */
+  font-family: var(--font-title);
+}
 .page-head p { margin: 0; color: var(--text-2); font-size: var(--fs-base); }
 
 .card {
@@ -408,7 +432,10 @@ a { color: var(--primary); text-decoration: none; }
 }
 .card + .card { margin-top: 16px; }
 .card-head { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); margin-bottom: 14px; }
-.card-head h3 { margin: 0; font-size: 15.5px; font-weight: 700; letter-spacing: -.01em; }
+.card-head h3 {
+  margin: 0; font-size: var(--fs-base); font-weight: 700; letter-spacing: -.01em;
+  font-family: var(--font-title);
+}
 .card-head .sub { font-size: var(--fs-sm); color: var(--text-3); font-weight: 400; }
 
 .grid { display: grid; gap: var(--sp-4); }
@@ -721,7 +748,7 @@ a { color: var(--primary); text-decoration: none; }
   color: var(--text-2); transition: background-color var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
 }
 .segment button:hover { color: var(--text); }
-.segment button.on { background: var(--surface); color: var(--primary-dark); box-shadow: 0 1px 3px rgba(16, 24, 40, .1); }
+.segment button.on { background: var(--surface); color: var(--primary-dark); box-shadow: 0 1px 3px rgba(74, 62, 40, .1); }
 
 /* 未在推荐路径内的等级：仍可点开查阅，用虚线+淡色区分而非禁用 */
 .segment button.locked {
@@ -1333,12 +1360,12 @@ a { color: var(--primary); text-decoration: none; }
   border-radius: 12px;
 }
 @keyframes lkHit {
-  0%   { box-shadow: 0 0 0 0 rgba(37, 99, 235, .55); background: rgba(37, 99, 235, .10); }
-  60%  { box-shadow: 0 0 0 8px rgba(37, 99, 235, 0); background: rgba(37, 99, 235, .04); }
-  100% { box-shadow: 0 0 0 0 rgba(37, 99, 235, 0); background: transparent; }
+  0%   { box-shadow: 0 0 0 0 rgba(58, 90, 168, .55); background: rgba(58, 90, 168, .10); }
+  60%  { box-shadow: 0 0 0 8px rgba(58, 90, 168, 0); background: rgba(58, 90, 168, .04); }
+  100% { box-shadow: 0 0 0 0 rgba(58, 90, 168, 0); background: transparent; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .lk-hit { animation: none; outline: 2px solid rgba(37, 99, 235, .5); }
+  .lk-hit { animation: none; outline: 2px solid rgba(58, 90, 168, .5); }
 }
 
 /* 英文释义（高考词库自带的 en 字段），作为中文释义的补充 */
@@ -1348,8 +1375,8 @@ a { color: var(--primary); text-decoration: none; }
   color: var(--text-2);
   padding: 8px 11px;
   margin-top: 8px;
-  background: rgba(37, 99, 235, .05);
-  border-left: 2px solid rgba(37, 99, 235, .3);
+  background: rgba(58, 90, 168, .05);
+  border-left: 2px solid rgba(58, 90, 168, .3);
   border-radius: 0 6px 6px 0;
 }
 
@@ -1540,12 +1567,11 @@ a { color: var(--primary); text-decoration: none; }
   }
 }
 
-/* ---------- 导航选中态：让当前页在滚动导航里一眼可见 ---------- */
-.nav button.on {
-  color: var(--primary-dark);
-  background: var(--primary-soft);
-}
-.nav button.on::after { display: none; }
+/* ---------- 导航选中态 ----------
+   子导航的选中态统一走下划线（.nav button.on 的 ::after）。
+   这里原先把 on 渲染成蓝底 chip，与主项的下划线语言冲突——
+   同一界面两种选中态隐喻，用户要猜哪个是「真选中」。 */
+.nav button.on::after { display: block; }
 
 /* ============================================================
    桌面端精修（≥ 1024px）
@@ -1570,7 +1596,7 @@ a { color: var(--primary); text-decoration: none; }
     padding: 20px 22px;
     border-radius: 16px;
     /* 双层阴影：贴近的一层给边界感，远的一层给浮起感 */
-    box-shadow: 0 1px 2px rgba(16, 24, 40, .03), 0 6px 20px rgba(16, 24, 40, .055);
+    box-shadow: 0 1px 2px rgba(74, 62, 40, .03), 0 6px 20px rgba(74, 62, 40, .055);
     transition: border-color .18s ease, box-shadow .18s ease;
   }
   .card + .card { margin-top: 18px; }
@@ -1635,7 +1661,7 @@ a { color: var(--primary); text-decoration: none; }
   .card {
     padding: 15px 15px;
     border-radius: 13px;
-    box-shadow: 0 1px 2px rgba(16, 24, 40, .035), 0 3px 12px rgba(16, 24, 40, .045);
+    box-shadow: 0 1px 2px rgba(74, 62, 40, .035), 0 3px 12px rgba(74, 62, 40, .045);
   }
   .card + .card { margin-top: 13px; }
   .card-head { margin-bottom: 13px; gap: var(--sp-3); flex-wrap: wrap; }
